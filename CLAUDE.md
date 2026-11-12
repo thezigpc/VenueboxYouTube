@@ -191,5 +191,13 @@ TV control. Ask it for platform hooks; tell it "<id> <version> is published, ple
   - Call `bg.launchApp(displayId, "youtube")` when YouTube is closed, using Lounge
     `get_screen_availability` to tell.
   - Pass the attention list to `bg.setAttention`.
+  - Agreed details: the box's command timeout is 5 s, so media_play answers within ~3 s
+    with `{ ok, launched?, pending: true }` and progress goes through status.
+  - Target states: linked | starting | playing | paused | local | unlinked | error. While a
+    play is pending the box polls status every 3 s for up to 60 s.
+  - media_stop = pause + clear queue, state "linked"; the box then takes the TV back for
+    its idle screen. It never touches a TV in "local".
+  - Unmapped TVs are left out of media.targets. "When the box starts: plan X" is a box
+    setting.
 - Open/Closed status on TV cards (Lounge get_screen_availability).
 - Ideas not started: scheduled plans, guest requests.
