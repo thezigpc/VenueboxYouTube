@@ -175,6 +175,12 @@ TV control. Ask it for platform hooks; tell it "<id> <version> is published, ple
 - A real Google project: the device flow with `youtube.readonly`.
 
 ## To do
+- **Roku results (2026-11-13, bench Roku Express 3930RW "It Comes from Above", Permissive):**
+  ECP `/launch/837` → 200, YouTube active within 3 s. DIAL `/dial/YouTube` answers 403 unless
+  the request has an `Origin` header (`package:…` or `https://www.youtube.com`); with it:
+  200, running, screenId present. Box 0.11.1 sends the Origin, so auto-matching should work
+  while YouTube is open. Still to check: link it by TV code, auto-match, and play from the
+  box's TVs page with YouTube closed (launch, then list).
 - **Roku Express test (the user, at home).** Results go to the box session; they decide the
   media-provider design (SDK 0.9.0).
   1. Roku: Settings → System → Advanced system settings → Control by mobile apps → Network
