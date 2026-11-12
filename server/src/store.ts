@@ -43,6 +43,10 @@ export interface StoredTv {
    * a restart, until staff press Take back or play something from the admin.
    */
   local?: { since: number; reason: string } | null;
+  /** On a box: the box TV (display id) this link is, set by staff or matched over DIAL. */
+  boxDisplayId?: string | null;
+  /** The mapping came from DIAL (a later DIAL match may move it); staff picks stick. */
+  boxMapAuto?: boolean;
 }
 
 export interface StoredGoogle {

@@ -1,7 +1,7 @@
 // TVs: link by TV code, Now Playing with controls, and "play this list on these TVs".
 
-import { useState, type FormEvent } from "react";
-import { thumbUrl, type TvInfo } from "@ytapp/shared";
+import { useEffect, useState, type FormEvent } from "react";
+import { thumbUrl, type BoxTvChoice, type TvInfo } from "@ytapp/shared";
 import { api } from "../api";
 import type { PanelProps } from "../pages/AdminPage";
 
@@ -42,7 +42,33 @@ function LinkTvForm({ act, onDone, relinkId }: Pick<PanelProps, "act"> & { onDon
   );
 }
 
-function TvCard({ tv, state, act }: { tv: TvInfo } & Pick<PanelProps, "state" | "act">) {
+/** On a box: which of the box's TVs this link is (so the box's TVs page can play our lists there). */
+function BoxTvPicker({ tv, boxTvs, act }: { tv: TvInfo; boxTvs: BoxTvChoice[] } & Pick<PanelProps, "act">) {
+  const current = tv.box?.displayId ?? "";
+  return (
+    <div className="stack-sm small">
+      <label className="check">
+        Box TV
+        <select value={current} onChange={(e) => void act(() => api.mapTv(tv.id, e.target.value || null), e.target.value ? "Matched to the box's TV." : "Unmatched.")}>
+          <option value="">Not matched</option>
+          {boxTvs.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.group ? `${b.group}: ` : ""}
+              {b.name}
+              {b.canLaunch ? "" : " (can't start YouTube)"}
+            </option>
+          ))}
+          {tv.box && !boxTvs.some((b) => b.id === tv.box!.displayId) && <option value={tv.box.displayId}>{tv.box.name}</option>}
+        </select>
+        {tv.box?.auto && <span className="muted">matched automatically</span>}
+      </label>
+      {tv.box && !tv.box.canLaunch && <p className="muted">The box can't start YouTube on this TV: open YouTube on it yourself.</p>}
+      {!tv.box && <p className="muted">Match it so the box's TVs page can play your lists here and start YouTube on it.</p>}
+    </div>
+  );
+}
+
+function TvCard({ tv, state, act, boxTvs }: { tv: TvInfo; boxTvs: BoxTvChoice[] | null } & Pick<PanelProps, "state" | "act">) {
   const [listId, setListId] = useState(tv.queue?.listId ?? "");
   const chosen = state.lists.find((l) => l.id === listId);
   const [loopPick, setLoopPick] = useState<boolean | null>(null);
@@ -93,6 +119,21 @@ function TvCard({ tv, state, act }: { tv: TvInfo } & Pick<PanelProps, "state" | 
         </div>
       )}
       {tv.link === "relink" && <LinkTvForm act={act} relinkId={tv.id} />}
+      {tv.link !== "relink" && (tv.starting || tv.appOpen === false) && (
+        <div className="row wrap small">
+          {tv.starting ? (
+            <span className="status">Starting YouTube on the TV…</span>
+          ) : (
+            <span className="muted">YouTube is closed on this TV.</span>
+          )}
+          {!tv.starting && tv.box?.canLaunch && (
+            <button className="link" onClick={() => void act(() => api.openTv(tv.id), "Asked the box to open YouTube.")}>
+              Open YouTube
+            </button>
+          )}
+        </div>
+      )}
+      {boxTvs && <BoxTvPicker tv={tv} boxTvs={boxTvs} act={act} />}
 
       {np ? (
         <div className="np">
@@ -188,7 +229,12 @@ function TvCard({ tv, state, act }: { tv: TvInfo } & Pick<PanelProps, "state" | 
         <label className="check small">
           <input type="checkbox" checked={loopOn} onChange={(e) => setLoopPick(e.target.checked)} /> Loop
         </label>
-        <button className="primary" disabled={!live || !listId} onClick={() => void act(() => api.play({ tvIds: [tv.id], listId, loop: loopOn }), "Sent to the TV.")}>
+        <button className="primary" disabled={!live || !listId} onClick={() =>
+            void act(async () => {
+              const r = await api.play({ tvIds: [tv.id], listId, loop: loopOn });
+              if (r.pending) throw Object.assign(new Error("Starting YouTube on the TV; the list follows in a few seconds."), { info: true });
+            }, "Sent to the TV.")
+          }>
           Play list
         </button>
       </div>
@@ -220,6 +266,14 @@ function TvCard({ tv, state, act }: { tv: TvInfo } & Pick<PanelProps, "state" | 
 }
 
 export function TvsPanel({ state, act, go }: PanelProps) {
+  // On a box: the venue's TVs, to match links to (null standalone).
+  const [boxTvs, setBoxTvs] = useState<BoxTvChoice[] | null>(null);
+  useEffect(() => {
+    api
+      .boxTvs()
+      .then((r) => setBoxTvs(r.onBox ? r.tvs : null))
+      .catch(() => setBoxTvs(null));
+  }, [state.tvs.length]);
   const [adding, setAdding] = useState(state.tvs.length === 0);
   const [groupList, setGroupList] = useState("");
   const [groupTvs, setGroupTvs] = useState<string[]>([]);
@@ -275,7 +329,7 @@ export function TvsPanel({ state, act, go }: PanelProps) {
 
       <div className="tv-grid">
         {state.tvs.map((tv) => (
-          <TvCard key={tv.id} tv={tv} state={state} act={act} />
+          <TvCard key={tv.id} tv={tv} state={state} act={act} boxTvs={boxTvs} />
         ))}
       </div>
 

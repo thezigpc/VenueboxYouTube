@@ -2,12 +2,15 @@
 
 import { randomBytes } from "node:crypto";
 import { log } from "@bargames/gamekit/server";
-import type { Plan, PlanItem } from "@ytapp/shared";
+import type { Plan, PlanItem, SavedList } from "@ytapp/shared";
 import type { Library } from "./library.js";
 import type { Store } from "./store.js";
 import { TvError, type TvManager } from "./tvs.js";
 
 export const MAX_PLANS = 50;
+
+/** Plays a list on a linked TV (starting YouTube there first when the box can). */
+export type PlayOnTv = (tvId: string, list: SavedList, loop?: boolean) => Promise<{ pending: boolean; launched?: boolean }>;
 
 export class Plans {
   constructor(
@@ -15,6 +18,7 @@ export class Plans {
     private readonly library: Library,
     private readonly tvs: TvManager,
     private readonly now: () => number = Date.now,
+    private readonly play: PlayOnTv = async (tvId, list, loop) => (await tvs.playList(tvId, list, undefined, loop), { pending: false }),
   ) {}
 
   all(): Plan[] {
@@ -84,10 +88,11 @@ export class Plans {
    * Starts every TV in the plan. Staff pressed Start, so this takes TVs back from local
    * control too. TVs left out of the plan are left alone. Returns what didn't start.
    */
-  async start(id: string): Promise<{ started: number; failed: string[] }> {
+  async start(id: string): Promise<{ started: number; pending: number; failed: string[] }> {
     const p = this.get(id);
     const failed: string[] = [];
     let started = 0;
+    let pending = 0;
     await Promise.all(
       p.items.map(async (it) => {
         const tvName = this.tvs.list().find((t) => t.id === it.tvId)?.name;
@@ -95,8 +100,9 @@ export class Plans {
         if (!tvName) return void failed.push("A TV in this plan isn't linked any more.");
         if (!list) return void failed.push(`${tvName}: its list was deleted.`);
         try {
-          await this.tvs.playList(it.tvId, list, undefined, it.loop);
-          started++;
+          const r = await this.play(it.tvId, list, it.loop);
+          if (r.pending) pending++;
+          else started++;
         } catch (err) {
           failed.push(`${tvName}: ${(err as Error).message}`);
         }
@@ -104,8 +110,8 @@ export class Plans {
     );
     p.lastStartedAt = this.now();
     await this.store.savePlans();
-    log.info("plans", "started", { plan: p.name, started, failed: failed.length });
-    return { started, failed };
+    log.info("plans", "started", { plan: p.name, started, pending, failed: failed.length });
+    return { started, pending, failed };
   }
 
   /** Drops a TV or list from every plan when it's removed. */

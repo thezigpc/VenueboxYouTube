@@ -13,7 +13,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { log } from "@bargames/gamekit/server";
 import { buildQueue, normalizeTvCode, thumbUrl, type NowPlaying, type PublicTv, type SavedList, type TvInfo, type TvLink, type Video } from "@ytapp/shared";
-import { LoungeSession, pairWithCode, refreshLoungeToken } from "./lounge/client.js";
+import { LoungeSession, pairWithCode, refreshLoungeToken, screenAvailable } from "./lounge/client.js";
 import { LoungeError, playState, screenNameFromStatus, type LoungeEvent } from "./lounge/protocol.js";
 import type { StoredQueue, StoredTv, Store } from "./store.js";
 
@@ -43,9 +43,32 @@ export interface TvTiming {
   /** Reconnect backoff bounds. */
   backoffMinMs: number;
   backoffMaxMs: number;
+  /** After starting YouTube on a TV: how often to look, and how long to wait for it. */
+  launchPollMs: number;
+  launchTimeoutMs: number;
+  /** How often to ask YouTube whether the app is open on each TV. */
+  availabilityMs: number;
 }
 
-export const DEFAULT_TIMING: TvTiming = { stallMs: 20_000, startGraceMs: 45_000, tickMs: 5_000, backoffMinMs: 2_000, backoffMaxMs: 60_000 };
+export const DEFAULT_TIMING: TvTiming = {
+  stallMs: 20_000,
+  startGraceMs: 45_000,
+  tickMs: 5_000,
+  backoffMinMs: 2_000,
+  backoffMaxMs: 60_000,
+  launchPollMs: 2_000,
+  launchTimeoutMs: 60_000,
+  availabilityMs: 30_000,
+};
+
+/** What a box TV can do for a link (from bg.tvs()). */
+export interface BoxTvRef {
+  name: string;
+  canLaunch: boolean;
+}
+
+/** Starts YouTube on a box TV; the box answers once the launch is accepted. */
+export type Launcher = () => Promise<{ ok: true } | { ok: false; message: string }>;
 
 export interface TvDeps {
   store: Store;
@@ -73,6 +96,11 @@ class TvSession {
   nowPlaying: NowPlaying | null = null;
   volume: number | null = null;
   muted = false;
+  /** YouTube open on the TV (null: not known yet). */
+  appOpen: boolean | null = null;
+  /** Waiting for YouTube to open before playing (a box launch). */
+  starting = false;
+  private availabilityAt = 0;
   private session: LoungeSession | null = null;
   private abort = new AbortController();
   private forceRefresh = false;
@@ -355,6 +383,21 @@ class TvSession {
     void this.d.store.saveTvs().catch(() => undefined);
   }
 
+  /** Asks YouTube whether its app is open on the TV (cheap; throttled unless forced). */
+  async checkOpen(force = false): Promise<boolean | null> {
+    const now = this.d.now();
+    if (!force && now - this.availabilityAt < this.d.timing.availabilityMs) return this.appOpen;
+    this.availabilityAt = now;
+    if (!this.tv.loungeToken || this.tv.relink) return this.appOpen;
+    const open = await screenAvailable(this.tv.loungeToken, this.d.fetch);
+    if (open !== null) this.appOpen = open;
+    return this.appOpen;
+  }
+
+  get connected(): boolean {
+    return this.link === "connected";
+  }
+
   /**
    * The watchdog. It only ever moves our own queue along when the TV is clearly stuck on
    * it: a video that never started (unplayable), or a video that ended with nothing after
@@ -362,6 +405,7 @@ class TvSession {
    * using the TV: hands off.
    */
   private async tick(): Promise<void> {
+    void this.checkOpen();
     const q = this.tv.queue;
     const np = this.nowPlaying;
     if (!q || this.tv.local || this.link !== "connected") return;
@@ -488,6 +532,9 @@ class TvSession {
       muted: this.muted,
       linkedAt: this.tv.linkedAt,
       local: this.tv.local ?? null,
+      appOpen: this.appOpen,
+      starting: this.starting,
+      box: null,
     };
   }
 }
@@ -518,8 +565,114 @@ export class TvManager {
     return s;
   }
 
+  /** Box TVs by display id (names, what they can start), refreshed from bg.tvs(). */
+  private boxTvs = new Map<string, BoxTvRef>();
+  setBoxTvs(m: Map<string, BoxTvRef>): void {
+    this.boxTvs = m;
+  }
+
   list(): TvInfo[] {
-    return this.d.store.tvs.map((tv) => this.sessions.get(tv.id)?.info()).filter((x): x is TvInfo => !!x);
+    return this.d.store.tvs
+      .map((tv) => {
+        const info = this.sessions.get(tv.id)?.info();
+        if (!info) return undefined;
+        if (tv.boxDisplayId) {
+          const b = this.boxTvs.get(tv.boxDisplayId);
+          info.box = { displayId: tv.boxDisplayId, name: b?.name ?? "(not on the box any more)", auto: !!tv.boxMapAuto, canLaunch: !!b?.canLaunch };
+        }
+        return info;
+      })
+      .filter((x): x is TvInfo => !!x);
+  }
+
+  /** The linked TV mapped to a box display. */
+  byDisplay(displayId: string): string | null {
+    return this.d.store.tvs.find((t) => t.boxDisplayId === displayId)?.id ?? null;
+  }
+
+  /** Maps a link to a box TV (null: unmap). A display belongs to one link at a time. */
+  async mapToBox(id: string, displayId: string | null, auto = false): Promise<void> {
+    const s = this.get(id);
+    for (const other of this.d.store.tvs) if (displayId && other.id !== id && other.boxDisplayId === displayId) other.boxDisplayId = null;
+    s.tv.boxDisplayId = displayId;
+    s.tv.boxMapAuto = !!displayId && auto;
+    await this.d.store.saveTvs();
+  }
+
+  /**
+   * Matches links to box TVs by YouTube screen id (read by the box over DIAL). Staff
+   * choices stick; DIAL fills in unmapped links and moves earlier DIAL matches.
+   */
+  async autoMap(screens: { displayId: string; screenId: string }[]): Promise<number> {
+    let changed = 0;
+    for (const { displayId, screenId } of screens) {
+      const tv = this.d.store.tvs.find((t) => t.screenId === screenId);
+      if (!tv || tv.boxDisplayId === displayId) continue;
+      if (tv.boxDisplayId && !tv.boxMapAuto) continue;
+      if (this.d.store.tvs.some((t) => t.id !== tv.id && t.boxDisplayId === displayId && !t.boxMapAuto)) continue;
+      await this.mapToBox(tv.id, displayId, true);
+      log.info("tv", "matched to a box TV over DIAL", { tv: tv.name, displayId });
+      changed++;
+    }
+    return changed;
+  }
+
+  /**
+   * Plays a list once YouTube is open on the TV. If it's closed and the box can start it
+   * (`launch`), asks the box to, then waits for the app and the link in the background.
+   * Resolves at once with pending: true while waiting (the box's commands time out at 5 s).
+   */
+  async playWhenReady(id: string, list: SavedList, opts: { loop?: boolean; launch?: Launcher } = {}): Promise<{ launched: boolean; pending: boolean }> {
+    const s = this.get(id);
+    if (s.tv.relink) throw new TvError("This TV's YouTube link stopped working: link it again with a new TV code.", 409);
+    const open = await s.checkOpen(true);
+    if (open !== false && s.connected) {
+      await this.playList(id, list, undefined, opts.loop);
+      return { launched: false, pending: false };
+    }
+    // Without a box to start YouTube there, waiting won't help: say what's wrong now.
+    if (!opts.launch) {
+      throw new TvError(open === false ? "YouTube isn't open on that TV. Open it there, then try again." : "The TV isn't connected right now. Is it on, with YouTube open?", 409);
+    }
+    let launched = false;
+    if (open === false) {
+      const r = await opts.launch();
+      if (!r.ok) throw new TvError(r.message, 409);
+      launched = true;
+    }
+    s.starting = true;
+    void (async () => {
+      const end = this.d.now() + this.d.timing.launchTimeoutMs;
+      const realEnd = Date.now() + this.d.timing.launchTimeoutMs;
+      try {
+        for (;;) {
+          if ((await s.checkOpen(true)) && s.connected) break;
+          if (this.d.now() > end || Date.now() > realEnd) throw new TvError("YouTube didn't open on the TV in time.");
+          await new Promise((r) => setTimeout(r, this.d.timing.launchPollMs));
+        }
+        // A freshly opened app needs a moment to take commands.
+        if (launched) await new Promise((r) => setTimeout(r, this.d.timing.launchPollMs));
+        await this.playList(id, list, undefined, opts.loop);
+      } catch (err) {
+        s.message = (err as Error).message;
+        log.warn("tv", "play after launch failed", { tv: s.tv.name, err: String(err) });
+      } finally {
+        s.starting = false;
+      }
+    })();
+    return { launched, pending: true };
+  }
+
+  /** Box-style state for a TV (status.media.targets). */
+  mediaState(id: string): "linked" | "starting" | "playing" | "paused" | "local" | "unlinked" | "error" {
+    const info = this.get(id).info();
+    if (info.link === "relink") return "unlinked";
+    if (info.starting) return "starting";
+    if (info.local) return "local";
+    if (info.link !== "connected") return "error";
+    if (info.nowPlaying?.state === "playing" || info.nowPlaying?.state === "buffering") return "playing";
+    if (info.nowPlaying?.state === "paused") return "paused";
+    return "linked";
   }
 
   publicList(): PublicTv[] {

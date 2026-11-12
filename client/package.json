@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@bargames/gamekit": "file:../vendor/bargames-gamekit-0.5.1.tgz",
-    "@bargames/sdk": "file:../vendor/bargames-sdk-0.8.0.tgz",
+    "@bargames/sdk": "file:../vendor/bargames-sdk-0.9.0.tgz",
     "@ytapp/shared": "*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

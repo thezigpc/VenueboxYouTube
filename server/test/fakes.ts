@@ -35,6 +35,9 @@ export class FakeLounge {
   /** Make every bind answer 401 once (expired token). */
   expireOnce = false;
   down = false;
+  /** YouTube open on the TV (get_screen_availability). */
+  appOpen = true;
+  availabilityChecks = 0;
 
   /** Pushes events to every open long poll. */
   push(name: string, arg?: unknown): void {
@@ -73,6 +76,10 @@ export class FakeLounge {
       if (form.get("pairing_code") !== GOOD_CODE) return new Response("not found", { status: 404 });
       this.screens.add(SCREEN_ID);
       return Response.json({ screen: { screenId: SCREEN_ID, loungeToken: "token-1", name: "Living Room TV" } });
+    }
+    if (p === "/pairing/get_screen_availability") {
+      this.availabilityChecks++;
+      return Response.json({ screens: [{ loungeToken: form.get("lounge_token"), status: this.appOpen ? "online" : "offline" }] });
     }
     if (p === "/pairing/get_lounge_token_batch") {
       this.tokenRefreshes++;
@@ -301,7 +308,8 @@ export async function startApp(opts: Partial<AppOptions> & { coreUrl?: string; c
       fetch: fetchFn,
       now: () => clock.now,
       scheduler: false,
-      tvTiming: { tickMs: 20, stallMs: 50, startGraceMs: 100, backoffMinMs: 10, backoffMaxMs: 50 },
+      tvTiming: { tickMs: 20, stallMs: 50, startGraceMs: 100, backoffMinMs: 10, backoffMaxMs: 50, launchPollMs: 20, launchTimeoutMs: 3000 },
+      mediaRefreshMs: 3_600_000,
       ...opts,
     });
     server = createServer(t.yt.app);

@@ -20,8 +20,8 @@ test("a plan plays its lists on its TVs with one press", async () => {
   const { tv, l } = await setup();
   const p = await t.call<Plan>("POST", "/plans", { name: "Saturday morning cartoons", items: [{ tvId: tv.id, listId: l.id, loop: false }] });
   assert.equal(p.items.length, 1);
-  const r = await t.call<{ started: number; failed: string[] }>("POST", `/plans/${p.id}/start`);
-  assert.deepEqual(r, { started: 1, failed: [] });
+  const r = await t.call<{ started: number; pending: number; failed: string[] }>("POST", `/plans/${p.id}/start`);
+  assert.deepEqual(r, { started: 1, pending: 0, failed: [] });
   const info = t.yt.tvs.list()[0]!;
   assert.equal(info.queue?.listName, "Cartoons");
   assert.equal(info.queue?.loop, false);

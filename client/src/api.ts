@@ -1,6 +1,6 @@
 // HTTP helpers. The client is always served by the server (Vite proxies in dev).
 
-import type { AdminState, GoogleStatus, ListSummary, Plan, PlanItem, PublicTv, SavedList, SearchHit, TvInfo, YtChannel, YtPlaylist } from "@ytapp/shared";
+import type { AdminState, BoxTvChoice, GoogleStatus, ListSummary, Plan, PlanItem, PublicTv, SavedList, SearchHit, TvInfo, YtChannel, YtPlaylist } from "@ytapp/shared";
 
 const TOKEN_KEY = "youtube.adminToken";
 
@@ -95,11 +95,14 @@ export const api = {
   relinkTv: (id: string, code: string) => request("POST", `/api/admin/tvs/${encodeURIComponent(id)}/relink`, { code }),
   control: (id: string, action: string, value?: number | boolean) => request("POST", `/api/admin/tvs/${encodeURIComponent(id)}/control`, { action, value }),
   addToTv: (id: string, link: string) => request("POST", `/api/admin/tvs/${encodeURIComponent(id)}/add`, { link }),
-  play: (body: { tvIds: string[]; listId?: string; link?: string; startVideoId?: string; loop?: boolean }) => request<{ failed: string[] }>("POST", "/api/admin/play", body),
+  play: (body: { tvIds: string[]; listId?: string; link?: string; startVideoId?: string; loop?: boolean }) => request<{ failed: string[]; pending?: number }>("POST", "/api/admin/play", body),
+  boxTvs: () => v(request<{ value: { onBox: boolean; tvs: BoxTvChoice[] } }>("GET", "/api/admin/box-tvs")),
+  mapTv: (id: string, boxDisplayId: string | null) => request("PATCH", `/api/admin/tvs/${encodeURIComponent(id)}`, { boxDisplayId }),
+  openTv: (id: string) => request("POST", `/api/admin/tvs/${encodeURIComponent(id)}/open`, {}),
 
   // Plans
   createPlan: (body: { name: string; items?: PlanItem[]; fromTvs?: boolean }) => v(request<{ value: Plan }>("POST", "/api/admin/plans", body)),
   updatePlan: (id: string, body: { name?: string; items?: PlanItem[] }) => v(request<{ value: Plan }>("PATCH", `/api/admin/plans/${encodeURIComponent(id)}`, body)),
   deletePlan: (id: string) => request("DELETE", `/api/admin/plans/${encodeURIComponent(id)}`),
-  startPlan: (id: string) => v(request<{ value: { started: number; failed: string[] } }>("POST", `/api/admin/plans/${encodeURIComponent(id)}/start`, {})),
+  startPlan: (id: string) => v(request<{ value: { started: number; pending: number; failed: string[] } }>("POST", `/api/admin/plans/${encodeURIComponent(id)}/start`, {})),
 };

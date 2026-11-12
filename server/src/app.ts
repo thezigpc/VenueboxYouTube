@@ -11,6 +11,7 @@ import { venueFacts } from "./bargames.js";
 import { GoogleError, GoogleService, type FallbackClient } from "./google/google.js";
 import { Library, LibraryError, summarize } from "./library.js";
 import { Plans } from "./plans.js";
+import { createMedia, type Media } from "./media.js";
 import { Store } from "./store.js";
 import { serverTimeZone, validZone, zonedParts } from "./time.js";
 import { TvError, TvManager, type TvTiming } from "./tvs.js";
@@ -26,6 +27,8 @@ export interface AppOptions {
   fetch?: typeof fetch;
   now?: () => number;
   tvTiming?: Partial<TvTiming>;
+  /** How often to re-read the box's TVs (tests: short). */
+  mediaRefreshMs?: number;
   /** Run the nightly scheduler (off in tests). */
   scheduler?: boolean;
 }
@@ -38,6 +41,7 @@ export interface YtApp {
   library: Library;
   tvs: TvManager;
   plans: Plans;
+  media: Media;
   /** One scheduler pass (tests call it directly). */
   nightly(): Promise<void>;
   close(): Promise<void>;
@@ -78,7 +82,6 @@ export async function createApp(o: AppOptions): Promise<YtApp> {
   });
   tvs.start();
   google.resumePolling();
-  const plans = new Plans(store, library, tvs, now);
 
   const auth = createAdminAuth({
     store: createJsonStore(o.dataDir),
@@ -105,6 +108,12 @@ export async function createApp(o: AppOptions): Promise<YtApp> {
     for (const t of tvs.list()) if (t.link === "relink") out.push({ level: "error", message: `${t.name}: the TV link stopped working. Re-link it with a new TV code.`, actionPath: "/admin#tvs" });
     return out;
   }
+
+  // On a box: the box's TVs page, Tonight page and startup choices drive our lists (SDK 0.9.0).
+  const media = createMedia({ bg, store, tvs, library, attention, refreshMs: o.mediaRefreshMs });
+  const plans = new Plans(store, library, tvs, now, media.playOnTv);
+  media.register(plans);
+  media.start();
 
   // ---------------------------------------------------------------- nightly
   let nightlyRunning = false;
@@ -358,7 +367,35 @@ export async function createApp(o: AppOptions): Promise<YtApp> {
   admin.patch(
     "/tvs/:id",
     safe(async (req, res) => {
-      res.json({ ok: true, value: await tvs.rename(String(req.params.id), (req.body as { name?: unknown })?.name) });
+      const b = (req.body ?? {}) as { name?: unknown; boxDisplayId?: unknown };
+      const id = String(req.params.id);
+      if (b.boxDisplayId !== undefined) {
+        if (b.boxDisplayId !== null && typeof b.boxDisplayId !== "string") return void res.status(400).json({ ok: false, error: "Pick a box TV." });
+        const known = b.boxDisplayId === null || (await media.refreshBoxTvs()).some((t) => t.id === b.boxDisplayId);
+        if (!known) return void res.status(400).json({ ok: false, error: "The box doesn't know that TV." });
+        await tvs.mapToBox(id, b.boxDisplayId as string | null);
+      }
+      if (b.name !== undefined) await tvs.rename(id, b.name);
+      res.json({ ok: true, value: tvs.list().find((t) => t.id === id) });
+    }),
+  );
+  /** On a box: the venue's TVs, to say which one a link is. Never includes screen ids. */
+  admin.get(
+    "/box-tvs",
+    safe(async (_req, res) => {
+      res.json({ ok: true, value: { onBox: bg.connected, tvs: await media.refreshBoxTvs() } });
+    }),
+  );
+  /** "Open YouTube on this TV": the box starts it (Roku over ECP). */
+  admin.post(
+    "/tvs/:id/open",
+    safe(async (req, res) => {
+      const id = String(req.params.id);
+      const launch = media.launcherFor(id);
+      if (!launch) return void res.status(409).json({ ok: false, error: "The box can't start YouTube on this TV. Open YouTube on it yourself." });
+      const r = await launch();
+      if (!r.ok) return void res.status(409).json({ ok: false, error: r.message });
+      res.json({ ok: true });
     }),
   );
   admin.delete(
@@ -402,13 +439,14 @@ export async function createApp(o: AppOptions): Promise<YtApp> {
       let play: (id: string) => Promise<unknown>;
       if (typeof b.listId === "string") {
         const list = library.get(b.listId);
-        play = (id) => tvs.playList(id, list, typeof b.startVideoId === "string" ? b.startVideoId : undefined, loop);
+        // From the top: start YouTube on the TV first if it's closed and the box can.
+        play = typeof b.startVideoId === "string" ? (id) => tvs.playList(id, list, b.startVideoId as string, loop) : (id) => media.playOnTv(id, list, loop);
       } else {
         const p = parseYouTubeLink(String(b.link ?? ""));
         if (!p) return void res.status(400).json({ ok: false, error: "Pick a list, or paste a YouTube link." });
         if (p.kind === "playlist") {
           const list = await library.importPlaylist(p.listId);
-          play = (id) => tvs.playList(id, list, undefined, loop);
+          play = (id) => media.playOnTv(id, list, loop);
         } else {
           const [v] = await library.lookupVideos([p.videoId]);
           play = (id) => tvs.playVideo(id, v!);
@@ -417,7 +455,8 @@ export async function createApp(o: AppOptions): Promise<YtApp> {
       const results = await Promise.allSettled(ids.map((id) => play(id)));
       const failed = results.flatMap((r, i) => (r.status === "rejected" ? [`${tvs.list().find((t) => t.id === ids[i])?.name ?? "TV"}: ${(r.reason as Error).message}`] : []));
       if (failed.length === ids.length) return void res.status(409).json({ ok: false, error: failed.join(" ") });
-      res.json({ ok: true, failed });
+      const pending = results.filter((r) => r.status === "fulfilled" && (r.value as { pending?: boolean } | undefined)?.pending).length;
+      res.json({ ok: true, failed, pending });
     }),
   );
 
@@ -482,11 +521,13 @@ export async function createApp(o: AppOptions): Promise<YtApp> {
     library,
     tvs,
     plans,
+    media,
     nightly: () => nightly(true),
     async close() {
       if (timer) clearInterval(timer);
       await google.close();
       auth.close();
+      media.close();
       await tvs.stopAll();
       await store.flush();
     },

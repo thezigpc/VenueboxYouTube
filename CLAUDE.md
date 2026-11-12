@@ -187,8 +187,8 @@ TV control. Ask it for platform hooks; tell it "<id> <version> is published, ple
   4. With YouTube open on the Roku, open `http://<roku-ip>:8060/dial/YouTube` in a browser
      on the same Wi-Fi. Is there a `<screenId>` in it? If so, the box can map TVs (and maybe
      link them) automatically. Also try it with YouTube closed.
-- **Media providers (SDK 0.9.0, designed with the box session 2026-11-12, waiting for the
-  user's go + the Roku results).** Our side:
+- **Media providers: built in 0.2.0 (SDK 0.9.0), `server/src/media.ts`; tested against a fake
+  core and the mock box. Still to confirm on a real Roku (test above).** Our side:
   - Map each linked TV to a box display (`bg.tvs()`), optional.
   - Commands media_list / media_play / media_stop: plans are venue-wide, displayId ignored.
   - Report `status.media.targets`, including a "starting" state.

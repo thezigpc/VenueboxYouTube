@@ -102,6 +102,22 @@ export interface TvInfo {
   linkedAt: number;
   /** Someone took the TV over: the app does nothing automatic until staff take it back. */
   local: { since: number; reason: string } | null;
+  /** YouTube is open on the TV (null: unknown). */
+  appOpen: boolean | null;
+  /** Waiting for YouTube to open on the TV before playing. */
+  starting: boolean;
+  /** On a box: the box TV this link is, and how it was matched. */
+  box: { displayId: string; name: string; auto: boolean; canLaunch: boolean } | null;
+}
+
+/** A venue TV the box knows (for mapping a link to it). */
+export interface BoxTvChoice {
+  id: string;
+  name: string;
+  group?: string;
+  kind: string;
+  online: boolean;
+  canLaunch: boolean;
 }
 
 /** What guests see on "/": no ids, codes or tokens. */

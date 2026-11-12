@@ -127,7 +127,7 @@ export function PlansPanel({ state, act, go }: PanelProps) {
                 onClick={() =>
                   void act(async () => {
                     const r = await api.startPlan(p.id);
-                    if (r.failed.length) throw new Error(`Started ${r.started}. ${r.failed.join(" ")}`);
+                    if (r.failed.length) throw new Error(`Started ${r.started + r.pending}. ${r.failed.join(" ")}`);
                   }, `"${p.name}" started.`)
                 }
               >

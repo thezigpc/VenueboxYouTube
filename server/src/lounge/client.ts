@@ -49,6 +49,22 @@ export async function refreshLoungeToken(screenId: string, fetchFn: typeof fetch
   return s.loungeToken;
 }
 
+/**
+ * Whether the YouTube app is open on the TV right now (pyytlounge is_available): true/false,
+ * or null when YouTube didn't answer (unknown, not "closed").
+ */
+export async function screenAvailable(loungeToken: string, fetchFn: typeof fetch = fetch): Promise<boolean | null> {
+  try {
+    const res = await post(fetchFn, `${LOUNGE_BASE}/pairing/get_screen_availability`, new URLSearchParams({ lounge_token: loungeToken }));
+    if (!res.ok) return null;
+    const screens = ((await json(res)) as { screens?: { status?: string }[] } | null)?.screens;
+    if (!Array.isArray(screens)) return null;
+    return screens[0]?.status === "online";
+  } catch {
+    return null;
+  }
+}
+
 export interface SessionOptions {
   screenId: string;
   loungeToken: string;

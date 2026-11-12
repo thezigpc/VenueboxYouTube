@@ -172,7 +172,7 @@ export function AdminPage() {
           void check();
           return false;
         }
-        setNotice({ text: err instanceof Error ? err.message : "That didn't work.", error: true });
+        setNotice({ text: err instanceof Error ? err.message : "That didn't work.", error: !(err as { info?: boolean }).info });
         await reload();
         return false;
       }
