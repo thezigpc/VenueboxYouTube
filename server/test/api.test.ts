@@ -114,3 +114,33 @@ describe("on a box", () => {
     assert.equal(st.timezone, "America/Chicago");
   });
 });
+
+describe("under a path prefix (venue.example.com/youtube/)", () => {
+  const dist = new URL("../../client/dist", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+
+  test("index.html carries the prefix; the API stays at the root behind the proxy", async () => {
+    const t = await startApp({ clientDist: dist, basePath: "/youtube", noLogin: true });
+    try {
+      for (const page of ["/", "/admin"]) {
+        const html = await (await t.get(page)).text();
+        assert.match(html, /<base href="\/youtube\/">/);
+        assert.match(html, /<meta name="bargames-base" content="\/youtube">/);
+      }
+      assert.equal((await t.get("/api/now")).status, 200);
+      assert.equal((await t.get("/api/nope")).status, 404);
+    } finally {
+      await t.stop();
+    }
+  });
+
+  test("without a prefix nothing is injected", async () => {
+    const t = await startApp({ clientDist: dist, basePath: "", noLogin: true });
+    try {
+      const html = await (await t.get("/admin")).text();
+      assert.doesNotMatch(html, /<base href/);
+      assert.match(html, /id="root"/);
+    } finally {
+      await t.stop();
+    }
+  });
+});

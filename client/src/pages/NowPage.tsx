@@ -2,14 +2,14 @@
 // shows only TV names and titles (no codes, accounts or controls).
 
 import { useEffect, useState } from "react";
-import { BackToGames, useGameName, VenueAnnouncement } from "@bargames/gamekit/client";
+import { BackToGames, basePath, useGameName, VenueAnnouncement } from "@bargames/gamekit/client";
 import { DEFAULT_NAME, type PublicTv } from "@ytapp/shared";
 import { api } from "../api";
 import { useVenue } from "../useVenue";
 
 export function NowPage() {
   const venue = useVenue();
-  const name = useGameName("", DEFAULT_NAME);
+  const name = useGameName(basePath(), DEFAULT_NAME);
   const [tvs, setTvs] = useState<PublicTv[] | null>(null);
 
   useEffect(() => {

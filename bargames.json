@@ -2,17 +2,20 @@
   "id": "youtube",
   "name": "YouTube",
   "kind": "app",
-  "version": "0.2.0",
-  "image": "ghcr.io/thezigpc/youtube:0.2.0",
+  "version": "0.3.0",
+  "image": "ghcr.io/thezigpc/youtube:0.3.0",
   "port": 3006,
   "sdk": {
-    "version": "0.9.1",
+    "version": "0.10.0",
     "level": 3
   },
   "routes": {
     "player": "/",
     "host": "/admin",
     "admin": "/admin"
+  },
+  "routing": {
+    "basePath": true
   },
   "health": "/health",
   "events": [],

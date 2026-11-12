@@ -39,6 +39,19 @@ looking at the admin without a real TV.
   actionPath }]` (Google disconnected, quota, API off, a TV that needs a new code), ready
   for the SDK 0.9.0 hook.
 
+## Path routing (SDK 0.10.0, kit 0.6.0)
+`"routing": { "basePath": true }`: on a box with path routing the app is served at
+`https://<venue host>/youtube/`. The proxy strips the prefix, so server routes stay the same.
+- The kit's `serveSpa` injects `<base href>` and the `bargames-base` meta into index.html,
+  from `BG_BASE_PATH` (or `BASE_PATH` self-hosted).
+- Vite `base: "./"`; every fetch goes through `bgUrl()`; staff sign-in and the name lookup
+  get `basePath()`; `main.tsx` strips the prefix before picking the page.
+- Shared origin: local storage keys are `youtube.*`; no cookies of our own; no service worker.
+- Checked with `npx bargames mock-box --base /youtube` (guest page, admin with staff
+  sign-in, box TV mapping, media_play on the fake Roku, `bargames check`), and at the root
+  without a prefix (tests). On Windows Git Bash, set `MSYS_NO_PATHCONV=1` or `/youtube`
+  gets rewritten into a Windows path.
+
 ## Guest page
 `/api/now` gives TV names, titles, channels and thumbnails only: no ids, TV codes,
 tokens or account names (tested).

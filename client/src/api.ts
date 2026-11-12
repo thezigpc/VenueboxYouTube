@@ -1,5 +1,6 @@
 // HTTP helpers. The client is always served by the server (Vite proxies in dev).
 
+import { bgUrl } from "@bargames/sdk/client";
 import type { AdminState, BoxTvChoice, GoogleStatus, ListSummary, Plan, PlanItem, PublicTv, SavedList, SearchHit, TvInfo, YtChannel, YtPlaylist } from "@ytapp/shared";
 
 const TOKEN_KEY = "youtube.adminToken";
@@ -37,7 +38,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   if (body !== undefined) headers["content-type"] = "application/json";
   let res: Response;
   try {
-    res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: "no-store" });
+    // Under path routing (venue.example.com/youtube/) every call carries the prefix.
+    res = await fetch(bgUrl(path), { method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: "no-store" });
   } catch {
     throw new ApiError("Can't reach the server. Check the connection and try again.", 0);
   }

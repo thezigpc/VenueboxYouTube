@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import type { BarGames } from "@bargames/sdk/server";
-import { adminRouter, createAdminAuth, createJsonStore, log, type AdminAuth } from "@bargames/gamekit/server";
+import { adminRouter, createAdminAuth, createJsonStore, log, serveSpa, type AdminAuth } from "@bargames/gamekit/server";
 import { buildQueue, DEFAULT_NAME, parseChannelLink, parseYouTubeLink, type AdminState, type Attention, type YtChannel, type YtPlaylist } from "@ytapp/shared";
 import { venueFacts } from "./bargames.js";
 import { GoogleError, GoogleService, type FallbackClient } from "./google/google.js";
@@ -23,6 +23,8 @@ export interface AppOptions {
   gameName?: string;
   clientDist?: string;
   googleFallback?: FallbackClient | null;
+  /** Path prefix for index.html (default: BG_BASE_PATH / BASE_PATH env). */
+  basePath?: string;
   /** Outgoing HTTP (Google, YouTube); tests pass a fake. */
   fetch?: typeof fetch;
   now?: () => number;
@@ -495,11 +497,8 @@ export async function createApp(o: AppOptions): Promise<YtApp> {
   // ---------------------------------------------------------------- client
   const indexHtml = o.clientDist ? path.join(o.clientDist, "index.html") : "";
   if (indexHtml && existsSync(indexHtml)) {
-    app.use(express.static(o.clientDist!, { index: false, maxAge: "1h" }));
-    app.get("*", (_req, res) => {
-      res.set("Cache-Control", "no-cache");
-      res.sendFile(indexHtml);
-    });
+    // index.html gets the path prefix (BG_BASE_PATH on a box, BASE_PATH self-hosted) injected.
+    serveSpa(app, { dist: o.clientDist!, ...(o.basePath !== undefined ? { basePath: o.basePath } : {}) });
   } else {
     log.warn("boot", "client build not found; serving the API only", { path: o.clientDist });
   }

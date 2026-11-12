@@ -3,6 +3,8 @@ import react from "@vitejs/plugin-react";
 
 // Dev: the client runs on :5176 and talks to the server on :3006.
 export default defineConfig({
+  // Relative asset URLs: the app may be served under a path (venue.example.com/youtube/).
+  base: "./",
   plugins: [react()],
   server: {
     host: true,

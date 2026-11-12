@@ -1,7 +1,8 @@
 // /admin: staff sign in (box staff go straight in), then TVs, Lists, Google and Settings.
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { staffSignIn, VenueAnnouncement } from "@bargames/gamekit/client";
+import { basePath, staffSignIn, VenueAnnouncement } from "@bargames/gamekit/client";
+import { bgUrl } from "@bargames/sdk/client";
 import type { AdminState } from "@ytapp/shared";
 import { api, ApiError, getToken, setToken, type AuthStatus } from "../api";
 import { useVenue } from "../useVenue";
@@ -124,7 +125,7 @@ export function AdminPage() {
         setState(await api.state());
         return;
       }
-      const staffToken = await staffSignIn("");
+      const staffToken = await staffSignIn(basePath());
       if (staffToken) {
         setToken(staffToken);
         setPhase({ kind: "ready" });
@@ -221,7 +222,7 @@ export function AdminPage() {
               ))}
             </nav>
             <div className="ad-header-links">
-              <a href="/" target="_blank" rel="noreferrer">
+              <a href={bgUrl("/")} target="_blank" rel="noreferrer">
                 Guest page
               </a>
               <button className="link" onClick={() => void signOut()}>
