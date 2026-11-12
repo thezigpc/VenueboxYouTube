@@ -6,7 +6,7 @@
   "image": "ghcr.io/thezigpc/youtube:0.2.0",
   "port": 3006,
   "sdk": {
-    "version": "0.9.0",
+    "version": "0.9.1",
     "level": 3
   },
   "routes": {
