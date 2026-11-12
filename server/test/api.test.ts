@@ -133,11 +133,11 @@ describe("under a path prefix (venue.example.com/youtube/)", () => {
     }
   });
 
-  test("without a prefix nothing is injected", async () => {
+  test("at the root the base is / (so /admin/ still loads its assets)", async () => {
     const t = await startApp({ clientDist: dist, basePath: "", noLogin: true });
     try {
-      const html = await (await t.get("/admin")).text();
-      assert.doesNotMatch(html, /<base href/);
+      const html = await (await t.get("/admin/")).text();
+      assert.match(html, /<base href="\/">/);
       assert.match(html, /id="root"/);
     } finally {
       await t.stop();
