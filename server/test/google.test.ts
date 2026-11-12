@@ -39,6 +39,8 @@ describe("setup and sign-in", () => {
     await until(() => t.yt.google.status().state === "connected" && !!t.yt.google.status().account, "connected", 5000);
     const s = await status();
     assert.equal(s.account, "The Root Bar");
+    assert.equal(s.channelHandle, "@therootbar");
+    assert.equal(s.channelId, "UCrootbar0000000000000");
     assert.equal(s.hasClientSecret, true);
     // The secret and tokens never go back to the browser.
     const raw = JSON.stringify(await t.call("GET", "/state"));

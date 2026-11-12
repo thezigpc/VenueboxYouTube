@@ -127,6 +127,8 @@ export class GoogleService {
       hasClientSecret: !!g.clientSecret,
       hasApiKey: !!g.apiKey,
       account: g.account,
+      channelHandle: g.channelHandle ?? "",
+      channelId: g.channelId ?? "",
       pending: state === "pending" && g.pending ? { userCode: g.pending.userCode, verificationUrl: g.pending.verificationUrl, expiresAt: g.pending.expiresAt } : null,
       problem,
       lastCheckedAt: g.lastCheckedAt,
@@ -172,6 +174,7 @@ export class GoogleService {
       g.refreshToken = "";
       g.tokenMode = null;
       g.account = "";
+      g.channelHandle = g.channelId = "";
       g.disconnected = false;
       this.access = null;
     }
@@ -218,6 +221,7 @@ export class GoogleService {
     this.g.refreshToken = "";
     this.g.tokenMode = null;
     this.g.account = "";
+    this.g.channelHandle = this.g.channelId = "";
     this.g.disconnected = false;
     this.g.problem = null;
     this.access = null;
@@ -348,8 +352,10 @@ export class GoogleService {
     try {
       if (this.signedIn) {
         await this.accessToken(true);
-        const r = (await this.api("channels", { part: "snippet", mine: "true" }, 1)) as { items?: { id?: string; snippet?: { title?: string } }[] };
+        const r = (await this.api("channels", { part: "snippet", mine: "true" }, 1)) as { items?: { id?: string; snippet?: { title?: string; customUrl?: string } }[] };
         this.g.account = r.items?.[0]?.snippet?.title ?? (r.items?.length ? "" : "(no YouTube channel)");
+        this.g.channelHandle = r.items?.[0]?.snippet?.customUrl ?? "";
+        this.g.channelId = r.items?.[0]?.id ?? "";
         log.info("google", "sign-in checked", { channel: this.g.account, channelId: r.items?.[0]?.id ?? null, channels: r.items?.length ?? 0 });
         if (this.g.problem?.kind !== "quota") this.g.problem = null;
       }

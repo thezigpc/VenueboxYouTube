@@ -189,7 +189,7 @@ export class FakeGoogle {
     if (this.apiDisabled) return Response.json({ error: { code: 403, message: "YouTube Data API v3 has not been used in project 1 before or it is disabled.", errors: [{ reason: "accessNotConfigured" }] } }, { status: 403 });
     const resource = url.pathname.split("/").pop();
     const q = url.searchParams;
-    if (resource === "channels") return Response.json({ items: [{ snippet: { title: "The Root Bar" } }] });
+    if (resource === "channels") return Response.json({ items: [{ id: "UCrootbar0000000000000", snippet: { title: "The Root Bar", customUrl: "@therootbar" } }] });
     if (resource === "playlists") {
       if (q.get("mine")) {
         return Response.json({

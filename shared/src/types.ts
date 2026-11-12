@@ -140,6 +140,9 @@ export interface GoogleStatus {
   hasApiKey: boolean;
   /** The YouTube channel signed in. */
   account: string;
+  /** Its @handle and id, to match against the channel the playlists are on. */
+  channelHandle: string;
+  channelId: string;
   pending: { userCode: string; verificationUrl: string; expiresAt: number } | null;
   problem: GoogleProblem | null;
   lastCheckedAt: number | null;

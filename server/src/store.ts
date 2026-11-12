@@ -49,6 +49,8 @@ export interface StoredGoogle {
   /** Which client the refresh token belongs to ("own" / "fallback"). */
   tokenMode: GoogleMode | null;
   account: string;
+  channelHandle?: string;
+  channelId?: string;
   disconnected: boolean;
   problem: GoogleProblem | null;
   lastCheckedAt: number | null;

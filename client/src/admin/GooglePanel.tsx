@@ -189,12 +189,39 @@ export function GooglePanel({ state, act, go }: PanelProps) {
       <section className="card stack-sm">
         <h2>Google connection</h2>
         {g.state === "connected" && (
-          <p>
-            <span className="status status-connected">Connected</span> as <b>{g.account || "the venue's account"}</b> (read-only). Lists refresh nightly.{" "}
-            <button className="link" onClick={() => go("lists")}>
-              Browse playlists
-            </button>
-          </p>
+          <div className="stack-sm">
+            <p>
+              <span className="status status-connected">Connected</span> to the YouTube channel <b>{g.account || "the venue's account"}</b>
+              {g.channelHandle && (
+                <>
+                  {" "}
+                  (
+                  <a href={`https://www.youtube.com/${g.channelHandle}`} target="_blank" rel="noreferrer">
+                    {g.channelHandle}
+                  </a>
+                  )
+                </>
+              )}
+              , read-only. Lists refresh nightly.{" "}
+              <button className="link" onClick={() => go("lists")}>
+                Browse playlists
+              </button>
+            </p>
+            <p className="muted small">
+              The playlists come from this channel. If yours are on another channel or Google account, use a different channel: Google asks which one when you sign in.{" "}
+              <button
+                className="link"
+                onClick={() =>
+                  void act(async () => {
+                    await api.googleSignOut();
+                    await api.googleSignIn();
+                  })
+                }
+              >
+                Use a different channel
+              </button>
+            </p>
+          </div>
         )}
         {g.state === "disconnected" && (
           <div className="stack-sm">

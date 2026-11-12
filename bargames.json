@@ -2,8 +2,8 @@
   "id": "youtube",
   "name": "YouTube",
   "kind": "app",
-  "version": "0.1.2",
-  "image": "ghcr.io/thezigpc/youtube:0.1.2",
+  "version": "0.1.3",
+  "image": "ghcr.io/thezigpc/youtube:0.1.3",
   "port": 3006,
   "sdk": { "version": "0.8.0", "level": 1 },
   "routes": {
