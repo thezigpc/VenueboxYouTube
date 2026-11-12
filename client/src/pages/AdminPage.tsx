@@ -1,7 +1,7 @@
 // /admin: staff sign in (box staff go straight in), then TVs, Lists, Google and Settings.
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { basePath, staffSignIn, VenueAnnouncement } from "@bargames/gamekit/client";
+import { basePath, BoxAdminLink, staffSignIn, VenueAnnouncement } from "@bargames/gamekit/client";
 import { bgUrl } from "@bargames/sdk/client";
 import type { AdminState } from "@ytapp/shared";
 import { api, ApiError, getToken, setToken, type AuthStatus } from "../api";
@@ -200,6 +200,8 @@ export function AdminPage() {
   return (
     <div className="ad-page">
       <VenueAnnouncement ctx={venue} />
+      {/* On a box: "Back to the box admin" (renders nothing standalone). */}
+      <BoxAdminLink ctx={venue} />
       {phase.kind === "loading" && <p className="muted center-page">Loading…</p>}
       {phase.kind === "offline" && (
         <div className="auth card">
