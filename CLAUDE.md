@@ -139,7 +139,7 @@ library. It never streams video itself.
   Node 22 images, `node:test` via tsx. Image `ghcr.io/thezigpc/<name>` via the
   publish-image workflow snippet (`GameBroker\integration\snippets\publish-image.yml`).
 - Commit when it makes sense; push and publish when the box session asks or the user does
-  (the user allows push requests from the box session). No GitHub repo yet.
+  (the user allows push requests from the box session). Repo: https://github.com/thezigpc/VenueboxYouTube (public; image public on GHCR).
 
 ## Talking to the box session
 The platform session (ListAgents, name starts with `gamebroker`) owns the SDK, the box and
