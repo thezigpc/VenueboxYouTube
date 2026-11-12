@@ -348,8 +348,9 @@ export class GoogleService {
     try {
       if (this.signedIn) {
         await this.accessToken(true);
-        const r = (await this.api("channels", { part: "snippet", mine: "true" }, 1)) as { items?: { snippet?: { title?: string } }[] };
+        const r = (await this.api("channels", { part: "snippet", mine: "true" }, 1)) as { items?: { id?: string; snippet?: { title?: string } }[] };
         this.g.account = r.items?.[0]?.snippet?.title ?? (r.items?.length ? "" : "(no YouTube channel)");
+        log.info("google", "sign-in checked", { channel: this.g.account, channelId: r.items?.[0]?.id ?? null, channels: r.items?.length ?? 0 });
         if (this.g.problem?.kind !== "quota") this.g.problem = null;
       }
     } catch (err) {
@@ -386,6 +387,7 @@ export class GoogleService {
       const body = (await res.json().catch(() => null)) as { error?: { code?: number; message?: string; errors?: { reason?: string }[]; details?: { reason?: string }[] } } | null;
       if (res.ok) return body;
       const reason = body?.error?.errors?.[0]?.reason ?? body?.error?.details?.[0]?.reason ?? "";
+      log.warn("google", "YouTube API error", { resource, status: res.status, reason, message: body?.error?.message?.slice(0, 200) });
       if (res.status === 401 && token && attempt === 0) {
         token = await this.accessToken(true);
         continue;
@@ -429,6 +431,7 @@ export class GoogleService {
       if (!r.nextPageToken) break;
       pageToken = r.nextPageToken;
     }
+    log.info("google", "read the account's playlists", { channel: this.g.account, playlists: out.length });
     return out;
   }
 

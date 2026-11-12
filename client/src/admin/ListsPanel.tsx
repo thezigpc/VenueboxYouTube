@@ -15,7 +15,7 @@ const ago = (t?: number) => {
   return h < 48 ? `${h} h ago` : `${Math.round(h / 24)} days ago`;
 };
 
-function BrowseYouTube({ act, onClose }: Pick<PanelProps, "act"> & { onClose: () => void }) {
+function BrowseYouTube({ act, onClose, account }: Pick<PanelProps, "act"> & { onClose: () => void; account: string }) {
   const [items, setItems] = useState<YtPlaylist[] | null>(null);
   const [error, setError] = useState("");
   const load = () =>
@@ -27,14 +27,24 @@ function BrowseYouTube({ act, onClose }: Pick<PanelProps, "act"> & { onClose: ()
   return (
     <section className="card">
       <header className="row between">
-        <h2>My YouTube playlists</h2>
+        <h2>Playlists on {account ? `"${account}"` : "this YouTube channel"}</h2>
         <button className="link" onClick={onClose}>
           Close
         </button>
       </header>
       {error && <p className="error">{error}</p>}
       {!items && !error && <p className="muted">Loading…</p>}
-      {items?.length === 0 && <p className="muted">This account has no playlists yet. Make one in YouTube ("Bar queue"), then come back. (Watch Later can't be read by apps.)</p>}
+      {items?.length === 0 && (
+        <div className="stack-sm muted">
+          <p>
+            YouTube has no playlists on the channel {account ? <b>"{account}"</b> : "signed in"}. (Watch Later and Liked videos can't be read by apps.)
+          </p>
+          <p className="small">
+            Made one already? It's probably on another channel or Google account: check the name at the top right of YouTube when you open the playlist. To switch, go to the Google page,
+            Sign out, then Sign in with Google and pick that channel when Google asks.
+          </p>
+        </div>
+      )}
       <ul className="yt-list">
         {items?.map((p) => (
           <li key={p.id}>
@@ -338,7 +348,7 @@ export function ListsPanel({ state, act, go }: PanelProps) {
         </form>
       </section>
 
-      {browse && <BrowseYouTube act={act} onClose={() => setBrowse(false)} />}
+      {browse && <BrowseYouTube act={act} onClose={() => setBrowse(false)} account={g.account} />}
 
       <div className="list-grid">
         {state.lists.map((l) => (
