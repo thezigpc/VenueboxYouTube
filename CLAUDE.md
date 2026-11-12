@@ -183,6 +183,9 @@ TV control. Ask it for platform hooks; tell it "<id> <version> is published, ple
      YouTube open? With the TV off, does HDMI-CEC wake it / switch input?
   3. Link the Roku with a TV code in the admin, play a list, close YouTube, run the
      launch again, press Take back: does the link reconnect and the list resume? How long?
+  4. With YouTube open on the Roku, open `http://<roku-ip>:8060/dial/YouTube` in a browser
+     on the same Wi-Fi. Is there a `<screenId>` in it? If so, the box can map TVs (and maybe
+     link them) automatically. Also try it with YouTube closed.
 - **Media providers (SDK 0.9.0, designed with the box session 2026-11-12, waiting for the
   user's go + the Roku results).** Our side:
   - Map each linked TV to a box display (`bg.tvs()`), optional.
@@ -199,5 +202,10 @@ TV control. Ask it for platform hooks; tell it "<id> <version> is published, ple
     its idle screen. It never touches a TV in "local".
   - Unmapped TVs are left out of media.targets. "When the box starts: plan X" is a box
     setting.
+- **Automatic TV mapping over DIAL (proposed to the box session 2026-11-12).** A TV's YouTube
+  app answers DIAL (`<app-url>/YouTube`, on a Roku `:8060/dial/YouTube`) with
+  `additionalData/screenId`, the same id as our Lounge link (pyytlounge dial.py does this).
+  The box, on the LAN, can read it per TV and report it in `bg.tvs()`; we match it to our
+  links, so no manual mapping, and maybe linking without a TV code (token from screenId).
 - Open/Closed status on TV cards (Lounge get_screen_availability).
 - Ideas not started: scheduled plans, guest requests.
