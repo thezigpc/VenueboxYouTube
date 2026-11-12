@@ -76,6 +76,12 @@ export class GoogleService {
     return this.g.clientId && this.g.clientSecret ? { clientId: this.g.clientId, clientSecret: this.g.clientSecret } : null;
   }
 
+  /** The sign-in in use: staff's choice, else Bar Games' when available (nothing to set up). */
+  get mode(): GoogleMode {
+    const chosen = this.g.mode === "fallback" && !this.fallback ? "own" : this.g.mode;
+    return chosen ?? (this.fallback ? "fallback" : "own");
+  }
+
   get signedIn(): boolean {
     return !!this.g.refreshToken && !this.g.disconnected;
   }
@@ -110,12 +116,12 @@ export class GoogleService {
     if (g.pending && g.pending.expiresAt > this.now()) state = "pending";
     else if (g.refreshToken && g.disconnected) state = "disconnected";
     else if (g.refreshToken && tokenClient) state = "connected";
-    else if (this.client(g.mode)) state = "signed-out";
+    else if (this.client(this.mode)) state = "signed-out";
     else state = "setup";
     const problem = g.problem?.kind === "quota" && g.problem.resetsAt <= this.now() ? null : g.problem;
     return {
       state,
-      mode: g.mode,
+      mode: this.mode,
       fallbackAvailable: !!this.fallback,
       clientId: g.clientId,
       hasClientSecret: !!g.clientSecret,
@@ -176,7 +182,7 @@ export class GoogleService {
   // ---------------------------------------------------------------- device flow
   /** Starts "Sign in with Google": returns the code staff enter at google.com/device. */
   async startSignIn(): Promise<{ userCode: string; verificationUrl: string; expiresAt: number }> {
-    const mode = this.g.mode;
+    const mode = this.mode;
     const client = this.client(mode);
     if (!client) throw new GoogleError(mode === "own" ? "Paste the OAuth client id and secret first (step 5)." : "Bar Games' sign-in isn't available.", 400);
     const r = await this.oauth(DEVICE_URL, { client_id: client.clientId, scope: SCOPE });

@@ -60,10 +60,15 @@ describe("setup and sign-in", () => {
     await assert.rejects(t.call("PUT", "/google/config", { mode: "fallback" }), /isn't available/);
     const f = await startApp({ googleFallback: { clientId: "123-abc.apps.googleusercontent.com", clientSecret: "op" } });
     try {
-      await f.call("PUT", "/google/config", { mode: "fallback" });
+      // Nothing set up yet: Bar Games' sign-in is the default, ready to sign in.
+      const first = (await f.call<AdminState>("GET", "/state")).google;
+      assert.deepEqual([first.mode, first.state], ["fallback", "signed-out"]);
       await f.call("POST", "/google/signin");
       await until(() => f.yt.google.status().state === "connected", "fallback connected", 5000);
       assert.equal(f.yt.google.status().mode, "fallback");
+      // Choosing our own project sticks.
+      await f.call("PUT", "/google/config", { mode: "own" });
+      assert.equal(f.yt.google.status().mode, "own");
     } finally {
       await f.stop();
     }

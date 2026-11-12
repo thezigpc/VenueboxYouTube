@@ -40,7 +40,8 @@ export interface StoredTv {
 }
 
 export interface StoredGoogle {
-  mode: GoogleMode;
+  /** null until staff choose: then Bar Games' sign-in if the server has it, else own. */
+  mode: GoogleMode | null;
   clientId: string;
   clientSecret: string;
   apiKey: string;
@@ -55,7 +56,7 @@ export interface StoredGoogle {
 }
 
 export const DEFAULT_GOOGLE: StoredGoogle = {
-  mode: "own",
+  mode: null,
   clientId: "",
   clientSecret: "",
   apiKey: "",
