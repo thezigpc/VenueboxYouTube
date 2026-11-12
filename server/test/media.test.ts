@@ -183,6 +183,29 @@ describe("the box's commands", () => {
     await until(() => !t.yt.tvs.list()[0]!.starting, "not starting");
   });
 
+  test("YouTube doesn't say whether it's open: start it anyway, then play", async () => {
+    await linkedAndMapped();
+    const l = await list();
+    t.lounge.availabilityBroken = true;
+    const r = await command<{ ok: boolean; data: { pending: boolean; launched: boolean } }>("media_play", { displayId: ROKU, itemId: l.id });
+    assert.deepEqual([r.ok, r.data.launched, r.data.pending], [true, true, true]);
+    assert.equal(core.launches.length, 1);
+    await until(() => setPlaylists() === 1, "played after the unknown wait");
+  });
+
+  test("the TV link is down when Play is pressed: start YouTube, reconnect, then play", async () => {
+    await linkedAndMapped();
+    const l = await list();
+    t.lounge.appOpen = false;
+    t.lounge.down = true;
+    t.lounge.closeStreams();
+    await until(() => t.yt.tvs.list()[0]!.link === "connecting", "link down");
+    core.onLaunch = () => void setTimeout(() => ((t.lounge.down = false), (t.lounge.appOpen = true)), 100);
+    const r = await command<{ ok: boolean; data: { launched: boolean } }>("media_play", { displayId: ROKU, itemId: l.id });
+    assert.deepEqual([r.ok, r.data.launched], [true, true]);
+    await until(() => setPlaylists() === 1, "played after reconnect", 5000);
+  });
+
   test("a Roku that blocks the box: a clear 'Permissive' message", async () => {
     await linkedAndMapped();
     const l = await list();

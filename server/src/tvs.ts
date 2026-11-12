@@ -101,6 +101,8 @@ class TvSession {
   /** Waiting for YouTube to open before playing (a box launch). */
   starting = false;
   private availabilityAt = 0;
+  /** Cuts a reconnect wait short (after the box starts YouTube on the TV). */
+  private wakeUp: (() => void) | null = null;
   private session: LoungeSession | null = null;
   private abort = new AbortController();
   private forceRefresh = false;
@@ -192,7 +194,12 @@ class TvSession {
         this.link = "connecting";
         this.message = e.kind === "protocol" ? `YouTube's TV link answered unexpectedly (${e.message}). Retrying.` : `${e.message} Retrying.`;
         log.warn("tv", "connection problem", { tv: this.tv.name, kind: e.kind, err: e.message });
-        await sleep(backoff, signal);
+        await new Promise<void>((resolve) => {
+          const t = setTimeout(resolve, backoff);
+          this.wakeUp = () => (clearTimeout(t), resolve());
+          signal.addEventListener("abort", () => (clearTimeout(t), resolve()), { once: true });
+        });
+        this.wakeUp = null;
         backoff = Math.min(backoff * 2, this.d.timing.backoffMaxMs);
       }
     }
@@ -390,12 +397,19 @@ class TvSession {
     this.availabilityAt = now;
     if (!this.tv.loungeToken || this.tv.relink) return this.appOpen;
     const open = await screenAvailable(this.tv.loungeToken, this.d.fetch);
-    if (open !== null) this.appOpen = open;
-    return this.appOpen;
+    // A forced check (before playing) needs a fresh answer: no answer means unknown, not
+    // whatever YouTube said last time. Routine checks keep the last known answer.
+    if (open !== null || force) this.appOpen = open;
+    return open;
   }
 
   get connected(): boolean {
     return this.link === "connected";
+  }
+
+  /** Reconnect now instead of after the backoff (YouTube was just started on the TV). */
+  reconnectNow(): void {
+    this.wakeUp?.();
   }
 
   /**
@@ -626,29 +640,45 @@ export class TvManager {
     const s = this.get(id);
     if (s.tv.relink) throw new TvError("This TV's YouTube link stopped working: link it again with a new TV code.", 409);
     const open = await s.checkOpen(true);
-    if (open !== false && s.connected) {
+    // Confirmed running and linked: play now.
+    if (open === true && s.connected) {
       await this.playList(id, list, undefined, opts.loop);
       return { launched: false, pending: false };
     }
-    // Without a box to start YouTube there, waiting won't help: say what's wrong now.
     if (!opts.launch) {
+      // No box to start YouTube: try anyway when the link is up (the open check can be wrong),
+      // otherwise say what's wrong now.
+      if (open !== false && s.connected) {
+        await this.playList(id, list, undefined, opts.loop);
+        return { launched: false, pending: false };
+      }
       throw new TvError(open === false ? "YouTube isn't open on that TV. Open it there, then try again." : "The TV isn't connected right now. Is it on, with YouTube open?", 409);
     }
-    let launched = false;
-    if (open === false) {
-      const r = await opts.launch();
-      if (!r.ok) throw new TvError(r.message, 409);
-      launched = true;
-    }
+    // Not confirmed running (closed, or YouTube didn't say): start it, wait, then play.
+    // Starting an app that's already open just brings it to the front.
+    const r = await opts.launch();
+    if (!r.ok) throw new TvError(r.message, 409);
+    const launched = true;
+    log.info("tv", "started YouTube through the box; waiting for it", { tv: s.tv.name, open, link: s.link });
+    s.reconnectNow();
     s.starting = true;
     void (async () => {
+      const startedReal = Date.now();
       const end = this.d.now() + this.d.timing.launchTimeoutMs;
-      const realEnd = Date.now() + this.d.timing.launchTimeoutMs;
+      const realEnd = startedReal + this.d.timing.launchTimeoutMs;
+      // If YouTube never says "open" (no answer), go ahead once the link is up and the app
+      // has had a few seconds to start.
+      const unknownOkAfter = startedReal + this.d.timing.launchPollMs * 4;
+      let lastOpen: boolean | null = open;
       try {
         for (;;) {
-          if ((await s.checkOpen(true)) && s.connected) break;
-          if (this.d.now() > end || Date.now() > realEnd) throw new TvError("YouTube didn't open on the TV in time.");
-          await new Promise((r) => setTimeout(r, this.d.timing.launchPollMs));
+          lastOpen = await s.checkOpen(true);
+          if (s.connected && (lastOpen === true || (lastOpen === null && Date.now() >= unknownOkAfter))) break;
+          if (!s.connected) s.reconnectNow();
+          if (this.d.now() > end || Date.now() > realEnd) {
+            throw new TvError(`YouTube didn't open on the TV in time (app ${lastOpen === null ? "didn't answer" : lastOpen ? "open" : "closed"}, link ${s.link}).`);
+          }
+          await new Promise((res) => setTimeout(res, this.d.timing.launchPollMs));
         }
         // A freshly opened app needs a moment to take commands.
         if (launched) await new Promise((r) => setTimeout(r, this.d.timing.launchPollMs));

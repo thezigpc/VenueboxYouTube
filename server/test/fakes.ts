@@ -37,6 +37,8 @@ export class FakeLounge {
   down = false;
   /** YouTube open on the TV (get_screen_availability). */
   appOpen = true;
+  /** The availability check answers with an error (YouTube "didn't say"). */
+  availabilityBroken = false;
   availabilityChecks = 0;
 
   /** Pushes events to every open long poll. */
@@ -79,6 +81,7 @@ export class FakeLounge {
     }
     if (p === "/pairing/get_screen_availability") {
       this.availabilityChecks++;
+      if (this.availabilityBroken) return new Response("oops", { status: 500 });
       return Response.json({ screens: [{ loungeToken: form.get("lounge_token"), status: this.appOpen ? "online" : "offline" }] });
     }
     if (p === "/pairing/get_lounge_token_batch") {
