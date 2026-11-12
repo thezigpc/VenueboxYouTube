@@ -1,0 +1,435 @@
+// The HTTP app: the guest Now Playing feed, the admin API, the built client. Built by a
+// function so tests run it in-process with their own data dir and a fake internet.
+
+import { existsSync } from "node:fs";
+import path from "node:path";
+import express, { type NextFunction, type Request, type Response } from "express";
+import type { BarGames } from "@bargames/sdk/server";
+import { adminRouter, createAdminAuth, createJsonStore, log, type AdminAuth } from "@bargames/gamekit/server";
+import { buildQueue, DEFAULT_NAME, parseYouTubeLink, type AdminState, type Attention, type YtPlaylist } from "@ytapp/shared";
+import { venueFacts } from "./bargames.js";
+import { GoogleError, GoogleService, type FallbackClient } from "./google/google.js";
+import { Library, LibraryError, summarize } from "./library.js";
+import { Store } from "./store.js";
+import { serverTimeZone, validZone, zonedParts } from "./time.js";
+import { TvError, TvManager, type TvTiming } from "./tvs.js";
+
+export interface AppOptions {
+  dataDir: string;
+  bg: BarGames;
+  adminPassword?: string;
+  gameName?: string;
+  clientDist?: string;
+  googleFallback?: FallbackClient | null;
+  /** Outgoing HTTP (Google, YouTube); tests pass a fake. */
+  fetch?: typeof fetch;
+  now?: () => number;
+  tvTiming?: Partial<TvTiming>;
+  /** Run the nightly scheduler (off in tests). */
+  scheduler?: boolean;
+}
+
+export interface YtApp {
+  app: express.Express;
+  store: Store;
+  auth: AdminAuth;
+  google: GoogleService;
+  library: Library;
+  tvs: TvManager;
+  /** One scheduler pass (tests call it directly). */
+  nightly(): Promise<void>;
+  close(): Promise<void>;
+}
+
+/** Async route errors go to the error handler instead of becoming unhandled rejections. */
+const safe =
+  (fn: (req: Request, res: Response) => Promise<void>) =>
+  (req: Request, res: Response, next: NextFunction) =>
+    void fn(req, res).catch(next);
+
+export async function createApp(o: AppOptions): Promise<YtApp> {
+  const fetchFn = o.fetch ?? fetch;
+  const now = o.now ?? Date.now;
+  const bg = o.bg;
+  const store = new Store(o.dataDir);
+  await store.init();
+
+  const google = new GoogleService(store, fetchFn, o.googleFallback ?? null, now);
+  const library = new Library(store, google, fetchFn, now);
+
+  const displayName = async () => (await venueFacts(bg))?.name ?? (store.settings.name || o.gameName || DEFAULT_NAME);
+  let cachedName = store.settings.name || o.gameName || DEFAULT_NAME;
+  const refreshName = () => void displayName().then((n) => (cachedName = n)).catch(() => undefined);
+  refreshName();
+
+  const tvs = new TvManager({
+    store,
+    fetch: fetchFn,
+    deviceName: () => cachedName,
+    nextRound: (listId) => {
+      const l = library.find(listId);
+      return l ? buildQueue(l.videos, l, { lastPlayed: store.lastPlayed, now: now() }) : [];
+    },
+    titleOf: (id) => library.titleOf(id),
+    timing: o.tvTiming,
+    now,
+  });
+  tvs.start();
+  google.resumePolling();
+
+  const auth = createAdminAuth({
+    store: createJsonStore(o.dataDir),
+    envPassword: o.adminPassword ?? "",
+    saltFormat: "bytes",
+    // Standalone behind a tunnel a whole venue shares one public IP: no per-IP lockout
+    // (the kit's global cap and delay still slow guessing). On a box each device has its own.
+    failsAllowed: bg.connected ? undefined : Number.POSITIVE_INFINITY,
+    // SDK 0.8.0: the box's admin password opens this admin too; kit 0.5.1 onBox: it takes over.
+    venuePassword: (pw, ip) => bg.checkVenuePassword(pw, ip),
+    onBox: bg.connected,
+  });
+  await auth.init();
+
+  const timezone = async () => validZone((await venueFacts(bg))?.timezone, serverTimeZone());
+
+  function attention(): Attention[] {
+    const out: Attention[] = [];
+    const g = google.status();
+    if (g.state === "disconnected") out.push({ level: "error", message: "Google disconnected: lists can't refresh. Reconnect.", actionPath: "/admin#google" });
+    if (g.problem?.kind === "quota") out.push({ level: "warn", message: "YouTube's daily limit is used up; lists refresh after midnight Pacific.", actionPath: "/admin#google" });
+    if (g.problem?.kind === "api-disabled") out.push({ level: "error", message: "The YouTube Data API is turned off for the Google project.", actionPath: "/admin#google" });
+    if (g.problem?.kind === "client-invalid") out.push({ level: "error", message: "Google doesn't accept the OAuth client any more.", actionPath: "/admin#google" });
+    for (const t of tvs.list()) if (t.link === "relink") out.push({ level: "error", message: `${t.name}: the TV link stopped working. Re-link it with a new TV code.`, actionPath: "/admin#tvs" });
+    return out;
+  }
+
+  // ---------------------------------------------------------------- nightly
+  let nightlyRunning = false;
+  async function nightly(force = false): Promise<void> {
+    if (nightlyRunning) return;
+    const tz = await timezone();
+    const p = zonedParts(tz, now());
+    if (!force && (p.hour !== store.settings.refreshHour || store.settings.lastNightlyDate === p.date)) return;
+    nightlyRunning = true;
+    try {
+      store.settings.lastNightlyDate = p.date;
+      await store.saveSettings();
+      // The daily sign-in test (refresh + 1-unit read), then the lists.
+      if (google.signedIn) await google.check();
+      if (google.canRead) {
+        const r = await library.refreshAll();
+        log.info("nightly", "lists refreshed", r);
+      }
+      store.settings.lastNightlyRefresh = now();
+      await store.saveSettings();
+    } catch (err) {
+      log.warn("nightly", "failed", { err: String(err) });
+    } finally {
+      nightlyRunning = false;
+    }
+  }
+  let timer: NodeJS.Timeout | null = null;
+  if (o.scheduler !== false) {
+    timer = setInterval(() => {
+      refreshName();
+      void nightly();
+    }, 60_000);
+    timer.unref();
+    // A box that was off at refresh time still tests its Google sign-in once a day.
+    const g = store.google;
+    if (google.signedIn && (!g.lastCheckedAt || now() - g.lastCheckedAt > 24 * 3600_000)) void google.check();
+  }
+
+  // ---------------------------------------------------------------- HTTP
+  const app = express();
+  app.disable("x-powered-by");
+  app.set("trust proxy", false);
+  app.use(bg.middleware());
+  app.use(express.json({ limit: "512kb" }));
+
+  app.get("/health", (_req, res) => {
+    res.json({ ok: true, tvs: store.tvs.length, lists: store.lists.length });
+  });
+
+  app.get(
+    "/api/config",
+    safe(async (_req, res) => {
+      res.set("Cache-Control", "no-cache");
+      res.json({ gameName: await displayName() });
+    }),
+  );
+
+  // Guests: what's on each TV. No ids, codes, tokens or account names.
+  app.get("/api/now", (_req, res) => {
+    res.set("Cache-Control", "no-cache");
+    res.json({ tvs: tvs.publicList() });
+  });
+
+  // ---------------------------------------------------------------- admin
+  const admin = adminRouter({ auth, clientIp: (req) => bg.clientIp(req), trusted: (req) => bg.isStaff(req) });
+
+  admin.get(
+    "/state",
+    safe(async (_req, res) => {
+      const body: AdminState = {
+        tvs: tvs.list(),
+        lists: library.all().map(summarize),
+        google: google.status(),
+        settings: { name: store.settings.name, searchCap: store.settings.searchCap, refreshHour: store.settings.refreshHour },
+        attention: attention(),
+        timezone: await timezone(),
+        lastNightlyRefresh: store.settings.lastNightlyRefresh,
+      };
+      res.json(body);
+    }),
+  );
+
+  admin.put(
+    "/settings",
+    safe(async (req, res) => {
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      const s = store.settings;
+      if (b.name !== undefined) s.name = typeof b.name === "string" ? b.name.trim().slice(0, 60) : s.name;
+      if (b.searchCap !== undefined) {
+        const n = Number(b.searchCap);
+        if (!Number.isInteger(n) || n < 0 || n > 90) return void res.status(400).json({ ok: false, error: "Searches per day: 0 to 90 (each costs 100 of 10,000 daily units)." });
+        s.searchCap = n;
+      }
+      if (b.refreshHour !== undefined) {
+        const n = Number(b.refreshHour);
+        if (!Number.isInteger(n) || n < 0 || n > 23) return void res.status(400).json({ ok: false, error: "Refresh hour: 0 to 23." });
+        s.refreshHour = n;
+      }
+      await store.saveSettings();
+      refreshName();
+      res.json({ ok: true });
+    }),
+  );
+
+  // ---- Google
+  admin.put(
+    "/google/config",
+    safe(async (req, res) => {
+      await google.configure(req.body ?? {});
+      res.json({ ok: true, value: google.status() });
+    }),
+  );
+  admin.post(
+    "/google/signin",
+    safe(async (_req, res) => {
+      res.json({ ok: true, value: await google.startSignIn() });
+    }),
+  );
+  admin.post(
+    "/google/cancel",
+    safe(async (_req, res) => {
+      await google.cancelSignIn();
+      res.json({ ok: true });
+    }),
+  );
+  admin.post(
+    "/google/signout",
+    safe(async (_req, res) => {
+      await google.signOut();
+      res.json({ ok: true });
+    }),
+  );
+  admin.post(
+    "/google/check",
+    safe(async (_req, res) => {
+      res.json({ ok: true, value: await google.check() });
+    }),
+  );
+
+  // ---- YouTube browsing
+  admin.get(
+    "/youtube/playlists",
+    safe(async (_req, res) => {
+      const mine = await google.myPlaylists();
+      const saved = new Map(library.all().flatMap((l) => (l.source.kind === "youtube" ? [[l.source.playlistId, l.id] as const] : [])));
+      const value: YtPlaylist[] = mine.map((p) => ({ ...p, savedAs: saved.get(p.id) ?? null }));
+      res.json({ ok: true, value });
+    }),
+  );
+  admin.get(
+    "/youtube/search",
+    safe(async (req, res) => {
+      const q = String(req.query.q ?? "").trim();
+      if (q.length < 2 || q.length > 100) return void res.status(400).json({ ok: false, error: "Type what to search for." });
+      res.json({ ok: true, value: await google.search(q) });
+    }),
+  );
+
+  // ---- Library
+  admin.get(
+    "/lists/:id",
+    safe(async (req, res) => {
+      res.json({ ok: true, value: library.get(String(req.params.id)) });
+    }),
+  );
+  admin.post(
+    "/lists",
+    safe(async (req, res) => {
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      let l;
+      if (typeof b.playlistId === "string") l = await library.importPlaylist(b.playlistId);
+      else if (typeof b.link === "string") l = await library.importLink(b.link);
+      else if (typeof b.fromTv === "string") {
+        const q = tvs.queueVideos(b.fromTv);
+        l = await library.createLocal(b.name ?? `${q.name} (saved)`, q.videos);
+      } else l = await library.createLocal(b.name);
+      res.json({ ok: true, value: summarize(l) });
+    }),
+  );
+  admin.patch(
+    "/lists/:id",
+    safe(async (req, res) => {
+      res.json({ ok: true, value: await library.update(String(req.params.id), req.body ?? {}) });
+    }),
+  );
+  admin.delete(
+    "/lists/:id",
+    safe(async (req, res) => {
+      await library.remove(String(req.params.id));
+      res.json({ ok: true });
+    }),
+  );
+  admin.post(
+    "/lists/:id/refresh",
+    safe(async (req, res) => {
+      res.json({ ok: true, value: summarize(await library.refresh(String(req.params.id))) });
+    }),
+  );
+  admin.post(
+    "/lists/:id/copy",
+    safe(async (req, res) => {
+      res.json({ ok: true, value: summarize(await library.copy(String(req.params.id), (req.body as { name?: unknown })?.name)) });
+    }),
+  );
+  admin.post(
+    "/lists/:id/add",
+    safe(async (req, res) => {
+      const r = await library.addTo(String(req.params.id), req.body ?? {});
+      res.json({ ok: true, value: r.list, added: r.added });
+    }),
+  );
+  admin.post(
+    "/refresh-all",
+    safe(async (_req, res) => {
+      res.json({ ok: true, value: await library.refreshAll() });
+    }),
+  );
+
+  // ---- TVs
+  admin.post(
+    "/tvs",
+    safe(async (req, res) => {
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      res.json({ ok: true, value: await tvs.link(b.code, b.name) });
+    }),
+  );
+  admin.patch(
+    "/tvs/:id",
+    safe(async (req, res) => {
+      res.json({ ok: true, value: await tvs.rename(String(req.params.id), (req.body as { name?: unknown })?.name) });
+    }),
+  );
+  admin.delete(
+    "/tvs/:id",
+    safe(async (req, res) => {
+      await tvs.unlink(String(req.params.id));
+      res.json({ ok: true });
+    }),
+  );
+  admin.post(
+    "/tvs/:id/relink",
+    safe(async (req, res) => {
+      res.json({ ok: true, value: await tvs.relink(String(req.params.id), (req.body as { code?: unknown })?.code) });
+    }),
+  );
+  admin.post(
+    "/tvs/:id/control",
+    safe(async (req, res) => {
+      const b = (req.body ?? {}) as { action?: unknown; value?: unknown };
+      res.json({ ok: true, value: await tvs.control(String(req.params.id), String(b.action ?? ""), b.value) });
+    }),
+  );
+  admin.post(
+    "/tvs/:id/add",
+    safe(async (req, res) => {
+      const p = parseYouTubeLink(String((req.body as { link?: unknown })?.link ?? ""));
+      if (!p || p.kind !== "video") return void res.status(400).json({ ok: false, error: "Paste a YouTube video link." });
+      const [v] = await library.lookupVideos([p.videoId]);
+      res.json({ ok: true, value: await tvs.addVideo(String(req.params.id), v!) });
+    }),
+  );
+  /** Play a list (or one video link) on one or more TVs. */
+  admin.post(
+    "/play",
+    safe(async (req, res) => {
+      const b = (req.body ?? {}) as { tvIds?: unknown; listId?: unknown; link?: unknown; startVideoId?: unknown };
+      const ids = Array.isArray(b.tvIds) ? b.tvIds.filter((x): x is string => typeof x === "string") : [];
+      if (!ids.length) return void res.status(400).json({ ok: false, error: "Pick a TV." });
+      let play: (id: string) => Promise<unknown>;
+      if (typeof b.listId === "string") {
+        const list = library.get(b.listId);
+        play = (id) => tvs.playList(id, list, typeof b.startVideoId === "string" ? b.startVideoId : undefined);
+      } else {
+        const p = parseYouTubeLink(String(b.link ?? ""));
+        if (!p) return void res.status(400).json({ ok: false, error: "Pick a list, or paste a YouTube link." });
+        if (p.kind === "playlist") {
+          const list = await library.importPlaylist(p.listId);
+          play = (id) => tvs.playList(id, list);
+        } else {
+          const [v] = await library.lookupVideos([p.videoId]);
+          play = (id) => tvs.playVideo(id, v!);
+        }
+      }
+      const results = await Promise.allSettled(ids.map((id) => play(id)));
+      const failed = results.flatMap((r, i) => (r.status === "rejected" ? [`${tvs.list().find((t) => t.id === ids[i])?.name ?? "TV"}: ${(r.reason as Error).message}`] : []));
+      if (failed.length === ids.length) return void res.status(409).json({ ok: false, error: failed.join(" ") });
+      res.json({ ok: true, failed });
+    }),
+  );
+
+  app.use("/api/admin", admin);
+  app.use("/api", (_req, res) => void res.status(404).json({ ok: false, error: "Not found." }));
+
+  // ---------------------------------------------------------------- client
+  const indexHtml = o.clientDist ? path.join(o.clientDist, "index.html") : "";
+  if (indexHtml && existsSync(indexHtml)) {
+    app.use(express.static(o.clientDist!, { index: false, maxAge: "1h" }));
+    app.get("*", (_req, res) => {
+      res.set("Cache-Control", "no-cache");
+      res.sendFile(indexHtml);
+    });
+  } else {
+    log.warn("boot", "client build not found; serving the API only", { path: o.clientDist });
+  }
+
+  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    if (err instanceof GoogleError || err instanceof LibraryError || err instanceof TvError) {
+      return void res.status(err.status).json({ ok: false, error: err.message });
+    }
+    const status = (err as { status?: number }).status ?? (err as { statusCode?: number }).statusCode ?? 500;
+    if (status >= 500) log.error("http", "request failed", { err: String(err) });
+    if (!res.headersSent) res.status(status).json({ ok: false, error: status === 404 ? "Not found." : status < 500 ? "Bad request." : "Something went wrong." });
+  });
+
+  return {
+    app,
+    store,
+    auth,
+    google,
+    library,
+    tvs,
+    nightly: () => nightly(true),
+    async close() {
+      if (timer) clearInterval(timer);
+      await google.close();
+      auth.close();
+      await tvs.stopAll();
+      await store.flush();
+    },
+  };
+}

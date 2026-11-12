@@ -1,0 +1,37 @@
+# Standalone deployment on a Linux Docker host: docker compose up -d --build
+#
+# Publishes to 127.0.0.1 only; put a Cloudflare tunnel (or another reverse proxy) in
+# front. Check `docker ps` for a free host port first (3001-3006 are taken on dockerhost1).
+services:
+  app:
+    build: .
+    container_name: youtube-app
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${HOST_PORT:-3007}:3006"
+    environment:
+      PORT: "3006"
+      DATA_DIR: /data
+      GAME_NAME: "${GAME_NAME:-}"
+      # Leave unset to use the /admin first-run setup screen.
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}"
+      # Optional: the operator's Google OAuth client ("Use Bar Games' sign-in"). Put the
+      # values in .env (never in the repo). Without them that choice isn't offered.
+      GOOGLE_FALLBACK_CLIENT_ID: "${GOOGLE_FALLBACK_CLIENT_ID:-}"
+      GOOGLE_FALLBACK_CLIENT_SECRET: "${GOOGLE_FALLBACK_CLIENT_SECRET:-}"
+      # Nightly list refresh time zone when there's no box.
+      TZ: "${TZ:-America/New_York}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+    volumes:
+      # TV links, Google sign-in and the library survive rebuilds.
+      # The image runs as uid 1000: `sudo chown -R 1000:1000 ./data` if root created it.
+      - ./data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3006/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3

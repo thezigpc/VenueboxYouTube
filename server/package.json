@@ -1,0 +1,23 @@
+{
+  "name": "server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -b",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@bargames/gamekit": "file:../vendor/bargames-gamekit-0.5.1.tgz",
+    "@bargames/sdk": "file:../vendor/bargames-sdk-0.8.0.tgz",
+    "@ytapp/shared": "*",
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.5.5",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3"
+  }
+}
