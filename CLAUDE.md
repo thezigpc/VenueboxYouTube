@@ -179,8 +179,11 @@ TV control. Ask it for platform hooks; tell it "<id> <version> is published, ple
   ECP `/launch/837` → 200, YouTube active within 3 s. DIAL `/dial/YouTube` answers 403 unless
   the request has an `Origin` header (`package:…` or `https://www.youtube.com`); with it:
   200, running, screenId present. Box 0.11.1 sends the Origin, so auto-matching should work
-  while YouTube is open. Still to check: link it by TV code, auto-match, and play from the
-  box's TVs page with YouTube closed (launch, then list).
+  while YouTube is open.
+  **Verified 2026-11-12 with 0.3.3 + box 0.11.4:** from the Roku's Home, the box's play
+  launched YouTube (activeApp), it was up in ~6 s, and the list was sent. Lesson: the Lounge
+  link says "open, connected" after the app closed on a Roku: trust `activeApp`.
+  Still open: DIAL auto-match on a real Roku (needs YouTube open + box 0.11.1's Origin).
 - **Roku Express test (the user, at home).** Results go to the box session; they decide the
   media-provider design (SDK 0.9.0).
   1. Roku: Settings → System → Advanced system settings → Control by mobile apps → Network
