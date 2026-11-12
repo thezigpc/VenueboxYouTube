@@ -46,6 +46,8 @@ export interface TvTiming {
   /** After starting YouTube on a TV: how often to look, and how long to wait for it. */
   launchPollMs: number;
   launchTimeoutMs: number;
+  /** After the TV shows YouTube, how long the app gets to settle before we send the list. */
+  launchSettleMs: number;
   /** How often to ask YouTube whether the app is open on each TV. */
   availabilityMs: number;
 }
@@ -58,6 +60,7 @@ export const DEFAULT_TIMING: TvTiming = {
   backoffMaxMs: 60_000,
   launchPollMs: 2_000,
   launchTimeoutMs: 60_000,
+  launchSettleMs: 4_000,
   availabilityMs: 30_000,
 };
 
@@ -636,10 +639,22 @@ export class TvManager {
    * (`launch`), asks the box to, then waits for the app and the link in the background.
    * Resolves at once with pending: true while waiting (the box's commands time out at 5 s).
    */
-  async playWhenReady(id: string, list: SavedList, opts: { loop?: boolean; launch?: Launcher } = {}): Promise<{ launched: boolean; pending: boolean }> {
+  async playWhenReady(
+    id: string,
+    list: SavedList,
+    opts: {
+      loop?: boolean;
+      launch?: Launcher;
+      /** What the TV shows, asked of the TV itself by the box ("youtube", "home", "other"); undefined when it can't say. */
+      onScreen?: () => Promise<string | undefined>;
+    } = {},
+  ): Promise<{ launched: boolean; pending: boolean }> {
     const s = this.get(id);
     if (s.tv.relink) throw new TvError("This TV's YouTube link stopped working: link it again with a new TV code.", 409);
-    const open = await s.checkOpen(true);
+    // The TV's own answer wins: a Lounge link can say "open, connected" after YouTube closed.
+    const screen = opts.onScreen ? await opts.onScreen().catch(() => undefined) : undefined;
+    const open = screen !== undefined ? screen === "youtube" : await s.checkOpen(true);
+    log.info("tv", "play requested", { tv: s.tv.name, list: list.name, screen: screen ?? "(unknown)", open, link: s.link, canLaunch: !!opts.launch });
     // Confirmed running and linked: play now.
     if (open === true && s.connected) {
       await this.playList(id, list, undefined, opts.loop);
@@ -670,9 +685,13 @@ export class TvManager {
       // has had a few seconds to start.
       const unknownOkAfter = startedReal + this.d.timing.launchPollMs * 4;
       let lastOpen: boolean | null = open;
+      const tvCanSay = screen !== undefined;
       try {
         for (;;) {
-          lastOpen = await s.checkOpen(true);
+          if (tvCanSay) {
+            const now = await opts.onScreen!().catch(() => undefined);
+            lastOpen = now === undefined ? null : now === "youtube";
+          } else lastOpen = await s.checkOpen(true);
           if (s.connected && (lastOpen === true || (lastOpen === null && Date.now() >= unknownOkAfter))) break;
           if (!s.connected) s.reconnectNow();
           if (this.d.now() > end || Date.now() > realEnd) {
@@ -680,8 +699,9 @@ export class TvManager {
           }
           await new Promise((res) => setTimeout(res, this.d.timing.launchPollMs));
         }
-        // A freshly opened app needs a moment to take commands.
-        if (launched) await new Promise((r) => setTimeout(r, this.d.timing.launchPollMs));
+        // A freshly opened app needs a moment to join its link and take commands.
+        if (launched) await new Promise((r) => setTimeout(r, this.d.timing.launchSettleMs));
+        log.info("tv", "YouTube is up on the TV; sending the list", { tv: s.tv.name, list: list.name });
         await this.playList(id, list, undefined, opts.loop);
       } catch (err) {
         s.message = (err as Error).message;

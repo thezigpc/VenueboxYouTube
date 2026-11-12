@@ -68,8 +68,21 @@ export function createMedia(d: MediaDeps) {
     };
   }
 
+  /** What a linked TV's box TV shows now, asked of the TV by the box (SDK 0.10.4). */
+  function onScreenFor(tvId: string): (() => Promise<string | undefined>) | undefined {
+    const displayId = store.tvs.find((t) => t.id === tvId)?.boxDisplayId;
+    if (!bg.connected || !displayId) return undefined;
+    return async () => {
+      try {
+        return (await bg.tvs()).find((t) => t.id === displayId)?.activeApp;
+      } catch {
+        return undefined;
+      }
+    };
+  }
+
   /** Plays a list on a linked TV, starting YouTube there first when the box can. */
-  const playOnTv: PlayOnTv = (tvId, list, loop) => tvs.playWhenReady(tvId, list, { loop, launch: launcherFor(tvId) });
+  const playOnTv: PlayOnTv = (tvId, list, loop) => tvs.playWhenReady(tvId, list, { loop, launch: launcherFor(tvId), onScreen: onScreenFor(tvId) });
 
   /** Waits a little for work that may take long; then answers "pending" and lets it finish. */
   async function answerSoon<T>(work: Promise<T>): Promise<{ done: true; value: T } | { done: false }> {

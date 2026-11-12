@@ -20,6 +20,8 @@ interface Core {
   /** Called on each accepted launch (the test opens YouTube on the fake TV). */
   onLaunch: () => void;
   dialScreenId: string | undefined;
+  /** What the Roku shows (SDK 0.10.4 activeApp); undefined: the TV can't say. */
+  activeApp: string | undefined;
   close(): Promise<void>;
 }
 
@@ -32,6 +34,7 @@ async function fakeCore(): Promise<Core> {
     launchAnswer: { ok: true },
     onLaunch: () => undefined,
     dialScreenId: SCREEN_ID,
+    activeApp: undefined,
     close: async () => undefined,
   };
   const srv = http.createServer((req, res) => {
@@ -47,7 +50,15 @@ async function fakeCore(): Promise<Core> {
       if (req.url === "/internal/tvs") {
         return json({
           tvs: [
-            { id: ROKU, name: "Bar left", kind: "roku", online: true, canLaunch: ["youtube"], ...(core.dialScreenId ? { youtubeScreenId: core.dialScreenId } : {}) },
+            {
+              id: ROKU,
+              name: "Bar left",
+              kind: "roku",
+              online: true,
+              canLaunch: ["youtube"],
+              ...(core.dialScreenId ? { youtubeScreenId: core.dialScreenId } : {}),
+              ...(core.activeApp ? { activeApp: core.activeApp } : {}),
+            },
             { id: AIRPLAY, name: "Patio", kind: "airplay", online: true, canLaunch: [] },
           ],
         });
@@ -181,6 +192,31 @@ describe("the box's commands", () => {
     await until(() => setPlaylists() === 1, "played after launch");
     assert.ok(opened);
     await until(() => !t.yt.tvs.list()[0]!.starting, "not starting");
+  });
+
+  test("the Roku is on Home although the link says open: the TV's answer wins (start, wait, play)", async () => {
+    await linkedAndMapped();
+    const l = await list();
+    // The bench Roku: Lounge says online and connected, the TV shows its home screen.
+    t.lounge.appOpen = true;
+    core.activeApp = "home";
+    core.onLaunch = () => void setTimeout(() => (core.activeApp = "youtube"), 100);
+    const r = await command<{ ok: boolean; data: { pending: boolean; launched: boolean } }>("media_play", { displayId: ROKU, itemId: l.id });
+    assert.deepEqual([r.ok, r.data.launched, r.data.pending], [true, true, true]);
+    assert.equal(core.launches.length, 1);
+    assert.equal(setPlaylists(), 0);
+    await until(() => setPlaylists() === 1, "played once the TV shows YouTube");
+  });
+
+  test("the Roku shows YouTube and the link is up: play at once, no launch", async () => {
+    await linkedAndMapped();
+    const l = await list();
+    core.activeApp = "youtube";
+    t.lounge.appOpen = false; // the link's own check is ignored when the TV can say
+    const r = await command<{ ok: boolean; data: { pending: boolean; launched: boolean } }>("media_play", { displayId: ROKU, itemId: l.id });
+    assert.deepEqual([r.ok, r.data.launched, r.data.pending], [true, false, false]);
+    assert.equal(core.launches.length, 0);
+    assert.equal(setPlaylists(), 1);
   });
 
   test("YouTube doesn't say whether it's open: start it anyway, then play", async () => {

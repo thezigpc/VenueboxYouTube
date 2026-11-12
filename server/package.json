@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@bargames/gamekit": "file:../vendor/bargames-gamekit-0.6.1.tgz",
-    "@bargames/sdk": "file:../vendor/bargames-sdk-0.10.2.tgz",
+    "@bargames/sdk": "file:../vendor/bargames-sdk-0.10.4.tgz",
     "@ytapp/shared": "*",
     "express": "^4.19.2"
   },

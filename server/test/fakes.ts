@@ -311,7 +311,7 @@ export async function startApp(opts: Partial<AppOptions> & { coreUrl?: string; c
       fetch: fetchFn,
       now: () => clock.now,
       scheduler: false,
-      tvTiming: { tickMs: 20, stallMs: 50, startGraceMs: 100, backoffMinMs: 10, backoffMaxMs: 50, launchPollMs: 20, launchTimeoutMs: 3000 },
+      tvTiming: { tickMs: 20, stallMs: 50, startGraceMs: 100, backoffMinMs: 10, backoffMaxMs: 50, launchPollMs: 20, launchTimeoutMs: 3000, launchSettleMs: 20 },
       mediaRefreshMs: 3_600_000,
       ...opts,
     });
