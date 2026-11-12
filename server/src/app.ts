@@ -6,10 +6,11 @@ import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import type { BarGames } from "@bargames/sdk/server";
 import { adminRouter, createAdminAuth, createJsonStore, log, type AdminAuth } from "@bargames/gamekit/server";
-import { buildQueue, DEFAULT_NAME, parseYouTubeLink, type AdminState, type Attention, type YtPlaylist } from "@ytapp/shared";
+import { buildQueue, DEFAULT_NAME, parseChannelLink, parseYouTubeLink, type AdminState, type Attention, type YtChannel, type YtPlaylist } from "@ytapp/shared";
 import { venueFacts } from "./bargames.js";
 import { GoogleError, GoogleService, type FallbackClient } from "./google/google.js";
 import { Library, LibraryError, summarize } from "./library.js";
+import { Plans } from "./plans.js";
 import { Store } from "./store.js";
 import { serverTimeZone, validZone, zonedParts } from "./time.js";
 import { TvError, TvManager, type TvTiming } from "./tvs.js";
@@ -36,6 +37,7 @@ export interface YtApp {
   google: GoogleService;
   library: Library;
   tvs: TvManager;
+  plans: Plans;
   /** One scheduler pass (tests call it directly). */
   nightly(): Promise<void>;
   close(): Promise<void>;
@@ -76,6 +78,7 @@ export async function createApp(o: AppOptions): Promise<YtApp> {
   });
   tvs.start();
   google.resumePolling();
+  const plans = new Plans(store, library, tvs, now);
 
   const auth = createAdminAuth({
     store: createJsonStore(o.dataDir),
@@ -174,6 +177,7 @@ export async function createApp(o: AppOptions): Promise<YtApp> {
       const body: AdminState = {
         tvs: tvs.list(),
         lists: library.all().map(summarize),
+        plans: plans.all(),
         google: google.status(),
         settings: { name: store.settings.name, searchCap: store.settings.searchCap, refreshHour: store.settings.refreshHour },
         attention: attention(),
@@ -251,6 +255,27 @@ export async function createApp(o: AppOptions): Promise<YtApp> {
       res.json({ ok: true, value });
     }),
   );
+  // A channel by link or @handle, with its playlists (2 units).
+  admin.get(
+    "/youtube/channel",
+    safe(async (req, res) => {
+      const raw = String(req.query.q ?? "").trim();
+      const ref = parseChannelLink(raw) ?? (/^[A-Za-z0-9._-]{3,100}$/.test(raw) ? { handle: `@${raw}` } : null);
+      if (!ref) return void res.status(400).json({ ok: false, error: "Paste the channel's link or its @handle (old /c/ links don't work: open the channel and copy its @handle)." });
+      const c = await google.channel(ref);
+      const savedLists = new Map(library.all().flatMap((l) => (l.source.kind === "youtube" ? [[l.source.playlistId, l.id] as const] : [])));
+      const savedChannel = library.all().find((l) => l.source.kind === "channel" && l.source.channelId === c.id)?.id ?? null;
+      const playlists = (await google.channelPlaylists(c.id)).map((p) => ({ ...p, savedAs: savedLists.get(p.id) ?? null }));
+      const channel: YtChannel = { id: c.id, title: c.title, handle: c.handle, thumb: c.thumb, videoCount: c.videoCount, savedAs: savedChannel };
+      res.json({ ok: true, value: { channel, playlists } });
+    }),
+  );
+  admin.get(
+    "/youtube/subscriptions",
+    safe(async (_req, res) => {
+      res.json({ ok: true, value: await google.mySubscriptions() });
+    }),
+  );
   admin.get(
     "/youtube/search",
     safe(async (req, res) => {
@@ -273,6 +298,7 @@ export async function createApp(o: AppOptions): Promise<YtApp> {
       const b = (req.body ?? {}) as Record<string, unknown>;
       let l;
       if (typeof b.playlistId === "string") l = await library.importPlaylist(b.playlistId);
+      else if (typeof b.channelId === "string") l = await library.importChannel({ channelId: b.channelId }, { limit: b.limit, skipShorts: b.skipShorts });
       else if (typeof b.link === "string") l = await library.importLink(b.link);
       else if (typeof b.fromTv === "string") {
         const q = tvs.queueVideos(b.fromTv);
@@ -291,6 +317,7 @@ export async function createApp(o: AppOptions): Promise<YtApp> {
     "/lists/:id",
     safe(async (req, res) => {
       await library.remove(String(req.params.id));
+      await plans.forget({ listId: String(req.params.id) });
       res.json({ ok: true });
     }),
   );
@@ -338,6 +365,7 @@ export async function createApp(o: AppOptions): Promise<YtApp> {
     "/tvs/:id",
     safe(async (req, res) => {
       await tvs.unlink(String(req.params.id));
+      await plans.forget({ tvId: String(req.params.id) });
       res.json({ ok: true });
     }),
   );
@@ -367,19 +395,20 @@ export async function createApp(o: AppOptions): Promise<YtApp> {
   admin.post(
     "/play",
     safe(async (req, res) => {
-      const b = (req.body ?? {}) as { tvIds?: unknown; listId?: unknown; link?: unknown; startVideoId?: unknown };
+      const b = (req.body ?? {}) as { tvIds?: unknown; listId?: unknown; link?: unknown; startVideoId?: unknown; loop?: unknown };
+      const loop = typeof b.loop === "boolean" ? b.loop : undefined;
       const ids = Array.isArray(b.tvIds) ? b.tvIds.filter((x): x is string => typeof x === "string") : [];
       if (!ids.length) return void res.status(400).json({ ok: false, error: "Pick a TV." });
       let play: (id: string) => Promise<unknown>;
       if (typeof b.listId === "string") {
         const list = library.get(b.listId);
-        play = (id) => tvs.playList(id, list, typeof b.startVideoId === "string" ? b.startVideoId : undefined);
+        play = (id) => tvs.playList(id, list, typeof b.startVideoId === "string" ? b.startVideoId : undefined, loop);
       } else {
         const p = parseYouTubeLink(String(b.link ?? ""));
         if (!p) return void res.status(400).json({ ok: false, error: "Pick a list, or paste a YouTube link." });
         if (p.kind === "playlist") {
           const list = await library.importPlaylist(p.listId);
-          play = (id) => tvs.playList(id, list);
+          play = (id) => tvs.playList(id, list, undefined, loop);
         } else {
           const [v] = await library.lookupVideos([p.videoId]);
           play = (id) => tvs.playVideo(id, v!);
@@ -389,6 +418,35 @@ export async function createApp(o: AppOptions): Promise<YtApp> {
       const failed = results.flatMap((r, i) => (r.status === "rejected" ? [`${tvs.list().find((t) => t.id === ids[i])?.name ?? "TV"}: ${(r.reason as Error).message}`] : []));
       if (failed.length === ids.length) return void res.status(409).json({ ok: false, error: failed.join(" ") });
       res.json({ ok: true, failed });
+    }),
+  );
+
+  // ---- Plans
+  admin.post(
+    "/plans",
+    safe(async (req, res) => {
+      res.json({ ok: true, value: await plans.create(req.body ?? {}) });
+    }),
+  );
+  admin.patch(
+    "/plans/:id",
+    safe(async (req, res) => {
+      res.json({ ok: true, value: await plans.update(String(req.params.id), req.body ?? {}) });
+    }),
+  );
+  admin.delete(
+    "/plans/:id",
+    safe(async (req, res) => {
+      await plans.remove(String(req.params.id));
+      res.json({ ok: true });
+    }),
+  );
+  admin.post(
+    "/plans/:id/start",
+    safe(async (req, res) => {
+      const r = await plans.start(String(req.params.id));
+      if (!r.started && r.failed.length) return void res.status(409).json({ ok: false, error: r.failed.join(" ") });
+      res.json({ ok: true, value: r });
     }),
   );
 
@@ -423,6 +481,7 @@ export async function createApp(o: AppOptions): Promise<YtApp> {
     google,
     library,
     tvs,
+    plans,
     nightly: () => nightly(true),
     async close() {
       if (timer) clearInterval(timer);

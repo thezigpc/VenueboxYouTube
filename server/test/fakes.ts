@@ -9,6 +9,7 @@ import { createApp, type AppOptions, type YtApp } from "../src/app.js";
 import { makeBarGames } from "../src/bargames.js";
 
 export const GOOD_CODE = "111122223333";
+export const CARTOON_CHANNEL = "UCcartoon0000000000000000".slice(0, 24);
 export const SCREEN_ID = "screen-abc";
 
 /** Wraps events the way the bind endpoint does: "<len>\n<json>\n". */
@@ -150,6 +151,8 @@ export class FakeGoogle {
   constructor() {
     const vids = (n: number, prefix: string) => Array.from({ length: n }, (_, i) => ({ id: `${prefix}${String(i).padStart(11 - prefix.length, "0")}`, title: `${prefix} song ${i}` }));
     this.playlists.set("PLbarqueue0001", { title: "Bar queue", mine: true, videos: vids(120, "bq") });
+    // A channel's uploads: newest first, every third one a Short (30 s), one upcoming premiere.
+    this.playlists.set("UUcartoon0001", { title: "Uploads", mine: false, videos: vids(130, "ct") });
     this.playlists.set("PLchill000002", { title: "Chill", mine: true, videos: [...vids(3, "ch"), { id: "chGONE00000", title: "Deleted video", hidden: true }] });
   }
 
@@ -189,8 +192,23 @@ export class FakeGoogle {
     if (this.apiDisabled) return Response.json({ error: { code: 403, message: "YouTube Data API v3 has not been used in project 1 before or it is disabled.", errors: [{ reason: "accessNotConfigured" }] } }, { status: 403 });
     const resource = url.pathname.split("/").pop();
     const q = url.searchParams;
-    if (resource === "channels") return Response.json({ items: [{ id: "UCrootbar0000000000000", snippet: { title: "The Root Bar", customUrl: "@therootbar" } }] });
+    if (resource === "channels") {
+      // A cartoon channel by @handle or id; otherwise the signed-in account's channel.
+      if (q.get("forHandle") === "@cartoons" || q.get("id") === CARTOON_CHANNEL) {
+        return Response.json({
+          items: [{ id: CARTOON_CHANNEL, snippet: { title: "Cartoon Classics", customUrl: "@cartoons" }, contentDetails: { relatedPlaylists: { uploads: "UUcartoon0001" } }, statistics: { videoCount: "130" } }],
+        });
+      }
+      if (q.get("forHandle") || q.get("id") || q.get("forUsername")) return Response.json({ items: [] });
+      return Response.json({ items: [{ id: "UCrootbar0000000000000", snippet: { title: "The Root Bar", customUrl: "@therootbar" } }] });
+    }
+    if (resource === "subscriptions") {
+      return Response.json({ items: [{ snippet: { title: "Cartoon Classics", resourceId: { channelId: CARTOON_CHANNEL }, thumbnails: {} } }] });
+    }
     if (resource === "playlists") {
+      if (q.get("channelId") === CARTOON_CHANNEL) {
+        return Response.json({ items: [{ id: "PLcartoonfav1", snippet: { title: "Favorites", thumbnails: {} }, contentDetails: { itemCount: 3 } }] });
+      }
       if (q.get("mine")) {
         return Response.json({
           items: [...this.playlists].filter(([, p]) => p.mine).map(([id, p]) => ({ id, snippet: { title: p.title, thumbnails: {} }, contentDetails: { itemCount: p.videos.length }, status: { privacyStatus: "private" } })),
@@ -215,7 +233,18 @@ export class FakeGoogle {
       return Response.json({
         items: ids.flatMap((id) => {
           const v = all.get(id);
-          return v && !v.hidden ? [{ id, snippet: { title: v.title, channelTitle: "Chan" }, contentDetails: { duration: "PT3M30S" }, status: { uploadStatus: "processed" } }] : [];
+          if (!v || v.hidden) return [];
+          const n = Number(id.slice(2));
+          const short = id.startsWith("ct") && n % 3 === 2;
+          const upcoming = id === "ct000000000";
+          return [
+            {
+              id,
+              snippet: { title: v.title, channelTitle: "Chan", liveBroadcastContent: upcoming ? "upcoming" : "none" },
+              contentDetails: { duration: short ? "PT30S" : "PT3M30S" },
+              status: { uploadStatus: "processed" },
+            },
+          ];
         }),
       });
     }

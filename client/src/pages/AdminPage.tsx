@@ -7,13 +7,15 @@ import { api, ApiError, getToken, setToken, type AuthStatus } from "../api";
 import { useVenue } from "../useVenue";
 import { TvsPanel } from "../admin/TvsPanel";
 import { ListsPanel } from "../admin/ListsPanel";
+import { PlansPanel } from "../admin/PlansPanel";
 import { GooglePanel } from "../admin/GooglePanel";
 import { SettingsPanel } from "../admin/SettingsPanel";
 
 type Phase = { kind: "loading" } | { kind: "auth"; status: AuthStatus } | { kind: "ready" } | { kind: "offline"; message: string };
-export type Tab = "tvs" | "lists" | "google" | "settings";
+export type Tab = "tvs" | "plans" | "lists" | "google" | "settings";
 const TABS: { id: Tab; label: string }[] = [
   { id: "tvs", label: "TVs" },
+  { id: "plans", label: "Plans" },
   { id: "lists", label: "Lists" },
   { id: "google", label: "Google" },
   { id: "settings", label: "Settings" },
@@ -251,6 +253,7 @@ export function AdminPage() {
           ) : (
             <main className="ad-main">
               {tab === "tvs" && <TvsPanel {...props} />}
+              {tab === "plans" && <PlansPanel {...props} />}
               {tab === "lists" && <ListsPanel {...props} />}
               {tab === "google" && <GooglePanel {...props} />}
               {tab === "settings" && <SettingsPanel {...props} />}

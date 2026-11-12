@@ -2,7 +2,7 @@
 
 import { randomBytes } from "node:crypto";
 import { log } from "@bargames/gamekit/server";
-import { combine, isVideoId, parseYouTubeLink, thumbUrl, type ListSummary, type SavedList, type Video } from "@ytapp/shared";
+import { combine, isVideoId, parseChannelLink, parseYouTubeLink, thumbUrl, type ChannelRef, type ListSummary, type SavedList, type Video } from "@ytapp/shared";
 import { GoogleError, MAX_LIST_VIDEOS, type GoogleService } from "./google/google.js";
 import type { Store } from "./store.js";
 
@@ -91,21 +91,49 @@ export class Library {
     return this.add({ name: cleanName(title, "YouTube playlist"), source: { kind: "youtube", playlistId }, videos, shuffle: true, loop: true, noRepeatHours: 0, refreshedAt: this.now() });
   }
 
-  /** "Paste a link": a playlist link imports the list; a video link makes a one-video list. */
+  /** A channel's newest uploads as a list (refreshed like a YouTube list). */
+  async importChannel(ref: ChannelRef, opts: { limit?: unknown; skipShorts?: unknown } = {}): Promise<SavedList> {
+    const limit = Number(opts.limit ?? 200);
+    if (!Number.isInteger(limit) || limit < 10 || limit > 1000) throw new LibraryError("Newest videos: 10 to 1000.");
+    const skipShorts = opts.skipShorts === undefined ? true : !!opts.skipShorts;
+    const c = await this.google.channel(ref);
+    const existing = this.store.lists.find((l) => l.source.kind === "channel" && l.source.channelId === c.id);
+    if (existing && existing.source.kind === "channel") {
+      existing.source.limit = limit;
+      existing.source.skipShorts = skipShorts;
+      return this.refresh(existing.id);
+    }
+    this.room();
+    const videos = await this.google.channelVideos(c.uploadsId, limit, skipShorts);
+    return this.add({
+      name: cleanName(c.title, "YouTube channel"),
+      source: { kind: "channel", channelId: c.id, uploadsId: c.uploadsId, handle: c.handle, limit, skipShorts },
+      videos,
+      shuffle: true,
+      loop: true,
+      noRepeatHours: 0,
+      refreshedAt: this.now(),
+    });
+  }
+
+  /** "Paste a link": a playlist imports the list, a channel its newest uploads, a video a one-video list. */
   async importLink(link: unknown): Promise<SavedList> {
     const p = typeof link === "string" ? parseYouTubeLink(link) : null;
-    if (!p) throw new LibraryError("That isn't a YouTube playlist or video link.");
+    const ch = !p && typeof link === "string" ? parseChannelLink(link) : null;
+    if (ch) return this.importChannel(ch);
+    if (!p) throw new LibraryError("That isn't a YouTube playlist, channel or video link.");
     if (p.kind === "playlist" || p.listId) return this.importPlaylist(p.kind === "playlist" ? p.listId : p.listId!);
     const [video] = await this.lookupVideos([p.videoId]);
     return this.createLocal(video!.title || "New list", [video!]);
   }
 
-  /** Re-reads a YouTube list. Keeps the old videos (and notes why) when YouTube can't be read. */
+  /** Re-reads a YouTube list or channel. Keeps the old videos (and notes why) when YouTube can't be read. */
   async refresh(id: string): Promise<SavedList> {
     const l = this.get(id);
-    if (l.source.kind !== "youtube") return l;
+    const src = l.source;
+    if (src.kind === "local") return l;
     try {
-      const videos = await this.google.playlistVideos(l.source.playlistId);
+      const videos = src.kind === "youtube" ? await this.google.playlistVideos(src.playlistId) : await this.google.channelVideos(src.uploadsId, src.limit, src.skipShorts);
       l.videos = videos;
       l.refreshedAt = this.now();
       delete l.refreshError;
@@ -123,7 +151,7 @@ export class Library {
   async refreshAll(): Promise<{ refreshed: number; failed: number; stopped?: string }> {
     let refreshed = 0;
     let failed = 0;
-    for (const l of this.store.lists.filter((x) => x.source.kind === "youtube")) {
+    for (const l of this.store.lists.filter((x) => x.source.kind !== "local")) {
       try {
         await this.refresh(l.id);
         refreshed++;
@@ -147,6 +175,16 @@ export class Library {
       const n = Number(patch.noRepeatHours);
       if (!Number.isFinite(n) || n < 0 || n > 168) throw new LibraryError("No-repeat hours: 0 to 168.");
       l.noRepeatHours = Math.round(n);
+    }
+    if (l.source.kind === "channel" && (patch.limit !== undefined || patch.skipShorts !== undefined)) {
+      if (patch.limit !== undefined) {
+        const n = Number(patch.limit);
+        if (!Number.isInteger(n) || n < 10 || n > 1000) throw new LibraryError("Newest videos: 10 to 1000.");
+        l.source.limit = n;
+      }
+      if (patch.skipShorts !== undefined) l.source.skipShorts = !!patch.skipShorts;
+      await this.store.saveLists();
+      return this.refresh(l.id);
     }
     if (patch.videoIds !== undefined) {
       // Reorder / remove (local lists only; a YouTube list is edited in YouTube).

@@ -155,6 +155,13 @@ TV control. Ask it for platform hooks; tell it "<id> <version> is published, ple
   (setPlaylist with a window of 50 ids, addVideo top-up, a new round for looping lists),
   a watchdog that skips a video that won't play (at most 5 in a row), "detached" when
   someone uses the TV's own remote.
+- Local control (0.1.4): when someone uses a TV directly (plays something else, stops a
+  video that played, leaves the video), the TV goes `local` (persisted in tvs.json) and the
+  app does nothing automatic on it until staff press Take back, play a list or start a plan.
+- `server/src/plans.ts`: saved TV plans (list per TV, optional loop override), Start.
+- Channel lists (source kind `channel`): a channel's newest N uploads (Shorts ≤ 60 s
+  skipped by default), refreshed nightly; channel lookup by @handle/id, its playlists,
+  the account's subscriptions.
 - `server/src/google/google.ts`: device-flow sign-in, token refresh, Data API reads, quota
   (Pacific day), problems pointing at wizard steps. `server/src/library.ts`: lists.
 - Client: `pages/NowPage.tsx` (guests), `pages/AdminPage.tsx` with `admin/TvsPanel`,

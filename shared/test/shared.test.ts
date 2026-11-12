@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { buildQueue, combine, normalizeTvCode, parseIsoDuration, parseYouTubeLink, type Video } from "../src/index.js";
+import { buildQueue, combine, normalizeTvCode, parseChannelLink, parseIsoDuration, parseYouTubeLink, type Video } from "../src/index.js";
 
 describe("parseYouTubeLink", () => {
   test("watch, share, shorts and bare ids", () => {
@@ -25,6 +25,15 @@ describe("parseYouTubeLink", () => {
     assert.equal(parseYouTubeLink("hello there"), null);
     assert.equal(parseYouTubeLink(""), null);
   });
+});
+
+test("channel links", () => {
+  assert.deepEqual(parseChannelLink("@thezigpc"), { handle: "@thezigpc" });
+  assert.deepEqual(parseChannelLink("https://www.youtube.com/@thezigpc/videos"), { handle: "@thezigpc" });
+  assert.deepEqual(parseChannelLink("youtube.com/channel/UCuJgSr1zwEtSUBITTF2XI1w"), { channelId: "UCuJgSr1zwEtSUBITTF2XI1w" });
+  assert.deepEqual(parseChannelLink("https://www.youtube.com/user/someone"), { username: "someone" });
+  assert.equal(parseChannelLink("https://www.youtube.com/c/Old"), null);
+  assert.equal(parseChannelLink("https://www.youtube.com/watch?v=dQw4w9WgXcQ"), null);
 });
 
 test("TV codes", () => {

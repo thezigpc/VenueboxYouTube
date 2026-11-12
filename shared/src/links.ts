@@ -42,6 +42,32 @@ export function parseYouTubeLink(input: string): ParsedLink | null {
   return goodList ? { kind: "playlist", listId: goodList } : null;
 }
 
+export type ChannelRef = { handle: string } | { channelId: string } | { username: string };
+
+/**
+ * A channel from what staff paste: "@handle", a youtube.com/@handle, /channel/UC…, or
+ * /user/name link. Old /c/name links can't be looked up through the API (use the @handle).
+ */
+export function parseChannelLink(input: string): ChannelRef | null {
+  const text = input.trim();
+  if (/^@[A-Za-z0-9._-]{3,100}$/.test(text)) return { handle: text };
+  if (/^UC[A-Za-z0-9_-]{22}$/.test(text)) return { channelId: text };
+  let url: URL;
+  try {
+    url = new URL(/^https?:\/\//i.test(text) ? text : `https://${text}`);
+  } catch {
+    return null;
+  }
+  const host = url.hostname.toLowerCase().replace(/^(www|m|music)\./, "");
+  if (host !== "youtube.com") return null;
+  const parts = url.pathname.split("/").filter(Boolean).map((p) => decodeURIComponent(p));
+  const first = parts[0] ?? "";
+  if (/^@[^/]{3,100}$/.test(first)) return { handle: first };
+  if (first === "channel" && /^UC[A-Za-z0-9_-]{22}$/.test(parts[1] ?? "")) return { channelId: parts[1]! };
+  if (first === "user" && parts[1]) return { username: parts[1] };
+  return null;
+}
+
 /** "Link with TV code" codes are 12 digits; staff type them with spaces or dashes. */
 export function normalizeTvCode(input: string): string | null {
   const digits = input.replace(/[\s-]/g, "");

@@ -1,6 +1,7 @@
 // Everything this app keeps, as JSON files in DATA_DIR (the kit's atomic JSON store).
 //   settings.json   name, search cap, refresh hour, last nightly refresh
 //   lists.json      the library
+//   plans.json      saved TV plans
 //   tvs.json        linked TVs: screen ids and lounge tokens (0600) and each TV's queue
 //   google.json     OAuth client, refresh token, sign-in in progress (0600)
 //   usage.json      today's API units and searches (Pacific day)
@@ -8,7 +9,7 @@
 
 import { chmod } from "node:fs/promises";
 import { createJsonStore, log, type JsonStore } from "@bargames/gamekit/server";
-import type { GoogleMode, GoogleProblem, SavedList, Settings, Video } from "@ytapp/shared";
+import type { GoogleMode, GoogleProblem, Plan, SavedList, Settings, Video } from "@ytapp/shared";
 
 export const DEFAULT_SETTINGS: Settings = { name: "", searchCap: 20, refreshHour: 4 };
 
@@ -37,6 +38,11 @@ export interface StoredTv {
   /** YouTube stopped accepting the link: needs a new TV code. */
   relink?: boolean;
   queue?: StoredQueue | null;
+  /**
+   * Someone took the TV over (its own remote, a phone): we keep our hands off it, also after
+   * a restart, until staff press Take back or play something from the admin.
+   */
+  local?: { since: number; reason: string } | null;
 }
 
 export interface StoredGoogle {
@@ -91,6 +97,7 @@ export class Store {
   readonly json: JsonStore;
   settings: SettingsFile = { ...DEFAULT_SETTINGS, lastNightlyRefresh: null, lastNightlyDate: "" };
   lists: SavedList[] = [];
+  plans: Plan[] = [];
   tvs: StoredTv[] = [];
   google: StoredGoogle = { ...DEFAULT_GOOGLE };
   usage: Usage = { day: "", units: 0, searches: 0 };
@@ -106,6 +113,8 @@ export class Store {
     if (s) this.settings = { ...this.settings, ...s };
     const l = await this.json.read<{ lists: SavedList[] }>("lists.json", obj<{ lists: SavedList[] }>());
     if (Array.isArray(l?.lists)) this.lists = l.lists;
+    const pl = await this.json.read<{ plans: Plan[] }>("plans.json", obj<{ plans: Plan[] }>());
+    if (Array.isArray(pl?.plans)) this.plans = pl.plans;
     const t = await this.json.read<{ tvs: StoredTv[] }>("tvs.json", obj<{ tvs: StoredTv[] }>());
     if (Array.isArray(t?.tvs)) this.tvs = t.tvs;
     const g = await this.json.read<StoredGoogle>("google.json", obj<StoredGoogle>());
@@ -123,6 +132,7 @@ export class Store {
 
   saveSettings = () => this.write("settings.json", this.settings);
   saveLists = () => this.write("lists.json", { lists: this.lists });
+  savePlans = () => this.write("plans.json", { plans: this.plans });
   saveTvs = () => this.write("tvs.json", { tvs: this.tvs });
   saveGoogle = () => this.write("google.json", this.google);
   saveUsage = () => this.write("usage.json", this.usage);

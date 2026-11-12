@@ -44,6 +44,9 @@ function LinkTvForm({ act, onDone, relinkId }: Pick<PanelProps, "act"> & { onDon
 
 function TvCard({ tv, state, act }: { tv: TvInfo } & Pick<PanelProps, "state" | "act">) {
   const [listId, setListId] = useState(tv.queue?.listId ?? "");
+  const chosen = state.lists.find((l) => l.id === listId);
+  const [loopPick, setLoopPick] = useState<boolean | null>(null);
+  const loopOn = loopPick ?? chosen?.loop ?? true;
   const [link, setLink] = useState("");
   const [vol, setVol] = useState<number | null>(null);
   const [editing, setEditing] = useState(false);
@@ -77,6 +80,18 @@ function TvCard({ tv, state, act }: { tv: TvInfo } & Pick<PanelProps, "state" | 
         <span className={`status status-${tv.link}`}>{tv.link === "connected" ? "Linked" : tv.link === "relink" ? "Needs a new code" : "Connecting…"}</span>
       </header>
       {tv.message && <p className={tv.link === "relink" ? "error small" : "muted small"}>{tv.message}</p>}
+      {tv.local && (
+        <div className="local-banner">
+          <p>
+            <b>Local control.</b> {tv.local.reason} The app leaves this TV alone until you take it back.
+          </p>
+          {tv.queue && tv.queue.length > 0 && (
+            <button disabled={!live} onClick={() => void act(() => api.control(tv.id, "takeback"), "Back to the list.")}>
+              Take back ({tv.queue.listName})
+            </button>
+          )}
+        </div>
+      )}
       {tv.link === "relink" && <LinkTvForm act={act} relinkId={tv.id} />}
 
       {np ? (
@@ -91,11 +106,10 @@ function TvCard({ tv, state, act }: { tv: TvInfo } & Pick<PanelProps, "state" | 
             {tv.queue && (
               <p className="muted small">
                 {tv.queue.detached ? (
-                  <>Playing something else (the TV's own remote). Press Play on a list to take over again.</>
+                  <>Not from the app's list.</>
                 ) : (
                   <>
                     {tv.queue.listName} · {tv.queue.index + 1} of {tv.queue.length}
-                    {tv.queue.loop && " · loops"}
                   </>
                 )}
               </p>
@@ -145,15 +159,25 @@ function TvCard({ tv, state, act }: { tv: TvInfo } & Pick<PanelProps, "state" | 
             onKeyUp={() => vol !== null && (ctl("volume", vol), setVol(null))}
           />
         </label>
-        {tv.queue && (
-          <button className="link small" disabled={!live} onClick={() => ctl("stop")}>
-            Stop list
-          </button>
+        {tv.queue && !tv.local && (
+          <>
+            {tv.queue.listId && (
+              <label className="check small">
+                <input type="checkbox" checked={tv.queue.loop} disabled={!live} onChange={(e) => void act(() => api.control(tv.id, "loop", e.target.checked))} /> Loop
+              </label>
+            )}
+            <button className="link small" disabled={!live} onClick={() => ctl("stop")}>
+              Stop list
+            </button>
+            <button className="link small" disabled={!live} onClick={() => ctl("release")} title="Stop the app from driving this TV; use the TV's own remote">
+              Hand to TV remote
+            </button>
+          </>
         )}
       </div>
 
       <div className="row wrap">
-        <select value={listId} onChange={(e) => setListId(e.target.value)} aria-label="List to play">
+        <select value={listId} onChange={(e) => (setListId(e.target.value), setLoopPick(null))} aria-label="List to play">
           <option value="">Choose a list…</option>
           {state.lists.map((l) => (
             <option key={l.id} value={l.id} disabled={!l.playable}>
@@ -161,7 +185,10 @@ function TvCard({ tv, state, act }: { tv: TvInfo } & Pick<PanelProps, "state" | 
             </option>
           ))}
         </select>
-        <button className="primary" disabled={!live || !listId} onClick={() => void act(() => api.play({ tvIds: [tv.id], listId }), "Sent to the TV.")}>
+        <label className="check small">
+          <input type="checkbox" checked={loopOn} onChange={(e) => setLoopPick(e.target.checked)} /> Loop
+        </label>
+        <button className="primary" disabled={!live || !listId} onClick={() => void act(() => api.play({ tvIds: [tv.id], listId, loop: loopOn }), "Sent to the TV.")}>
           Play list
         </button>
       </div>

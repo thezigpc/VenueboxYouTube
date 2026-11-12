@@ -105,12 +105,13 @@ describe("playing", () => {
     assert.match(t.yt.tvs.list()[0]!.message, /isn't playing/);
   });
 
-  test("someone using the TV's own remote detaches the queue (we don't fight it)", async () => {
+  test("someone using the TV's own remote takes it over (we don't fight it)", async () => {
     const tv = await linkTv();
     const l = await localList(5);
     await t.call("POST", "/play", { tvIds: [tv.id], listId: l.id });
     t.lounge.push("nowPlaying", { videoId: "dQw4w9WgXcQ", state: "1" });
     await until(() => t.yt.tvs.list()[0]!.queue?.detached === true, "detached");
+    assert.match(t.yt.tvs.list()[0]!.local!.reason, /something else/);
   });
 
   test("controls send the matching commands", async () => {
@@ -141,6 +142,96 @@ describe("playing", () => {
     await assert.rejects(t.call("POST", "/play", { tvIds: [tv.id], listId: l.id }), /isn't connected/);
     t.lounge.down = false;
     await until(() => t.yt.tvs.list()[0]!.link === "connected", "reconnected");
+  });
+});
+
+describe("local control", () => {
+  /** Plays a list and lets it get going on the TV. */
+  async function playing(n = 10) {
+    const tv = await linkTv();
+    const l = await localList(n);
+    await t.call("POST", "/play", { tvIds: [tv.id], listId: l.id });
+    t.lounge.push("nowPlaying", { videoId: "vid00000000", state: "1" });
+    await until(() => t.yt.tvs.list()[0]!.nowPlaying?.state === "playing", "playing");
+    t.clock.now += 1000; // past the start grace
+    return tv;
+  }
+  const sets = () => t.lounge.commands.filter((c) => c.name === "setPlaylist").length;
+  const settle = async () => {
+    for (let i = 0; i < 6; i++) {
+      t.clock.now += 1000;
+      await new Promise((r) => setTimeout(r, 40));
+    }
+  };
+
+  test("stopping a video on the TV hands it over: no restart, no skip", async () => {
+    await playing();
+    const before = sets();
+    t.lounge.push("onStateChange", { state: "-1" });
+    await until(() => t.yt.tvs.list()[0]!.nowPlaying?.state === "stopped", "stopped");
+    await settle();
+    const info = t.yt.tvs.list()[0]!;
+    assert.match(info.local?.reason ?? "", /stopped on the TV/);
+    assert.equal(info.queue?.detached, true);
+    assert.equal(sets(), before);
+  });
+
+  test("leaving the video on the TV hands it over too", async () => {
+    await playing();
+    const before = sets();
+    t.lounge.push("nowPlaying", {});
+    await until(() => t.yt.tvs.list()[0]!.nowPlaying === null, "left");
+    await settle();
+    assert.match(t.yt.tvs.list()[0]!.local?.reason ?? "", /left the video/);
+    assert.equal(sets(), before);
+  });
+
+  test("under local control nothing automatic happens, also after a restart", async () => {
+    await playing(70);
+    t.lounge.push("nowPlaying", { videoId: "dQw4w9WgXcQ", state: "1" });
+    await until(() => !!t.yt.tvs.list()[0]!.local, "local");
+    // The TV happens to play one of our videos again: still hands off (no top-up).
+    const adds = t.lounge.commands.filter((c) => c.name === "addVideo").length;
+    t.lounge.push("nowPlaying", { videoId: "vid00000045", state: "1" });
+    await settle();
+    assert.equal(t.lounge.commands.filter((c) => c.name === "addVideo").length, adds);
+    await t.restart();
+    await until(() => t.yt.tvs.list()[0]?.link === "connected", "connected");
+    assert.ok(t.yt.tvs.list()[0]!.local);
+  });
+
+  test("Take back resumes our list; Play list does too", async () => {
+    const tv = await playing();
+    t.lounge.push("nowPlaying", { videoId: "dQw4w9WgXcQ", state: "1" });
+    await until(() => !!t.yt.tvs.list()[0]!.local, "local");
+    await t.call("POST", `/tvs/${tv.id}/control`, { action: "takeback" });
+    assert.equal(t.yt.tvs.list()[0]!.local, null);
+    assert.equal([...t.lounge.commands].reverse().find((c) => c.name === "setPlaylist")!.params.videoId, "vid00000001");
+    await t.call("POST", `/tvs/${tv.id}/control`, { action: "release" });
+    assert.match(t.yt.tvs.list()[0]!.local!.reason, /admin/);
+  });
+
+  test("a video that ends with nothing after it on the TV moves our list along", async () => {
+    await playing();
+    const before = sets();
+    t.lounge.push("onStateChange", { state: "0" });
+    await until(() => t.yt.tvs.list()[0]!.nowPlaying?.state === "ended", "ended");
+    await settle();
+    const skips = t.lounge.commands.filter((c) => c.name === "setPlaylist").slice(before);
+    assert.ok(skips.length >= 1);
+    assert.equal(skips[0]!.params.videoId, "vid00000001");
+    assert.equal(t.yt.tvs.list()[0]!.local, null);
+  });
+
+  test("the end of a list that doesn't loop isn't a takeover", async () => {
+    const tv = await linkTv();
+    const l = await localList(1);
+    await t.call("POST", "/play", { tvIds: [tv.id], listId: l.id });
+    t.lounge.push("nowPlaying", { videoId: "vid00000000", state: "1" });
+    await until(() => t.yt.tvs.list()[0]!.nowPlaying?.state === "playing", "playing");
+    t.lounge.push("nowPlaying", {});
+    await settle();
+    assert.equal(t.yt.tvs.list()[0]!.local, null);
   });
 });
 

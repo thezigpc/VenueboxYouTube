@@ -1,6 +1,6 @@
 // HTTP helpers. The client is always served by the server (Vite proxies in dev).
 
-import type { AdminState, GoogleStatus, ListSummary, PublicTv, SavedList, SearchHit, TvInfo, YtPlaylist } from "@ytapp/shared";
+import type { AdminState, GoogleStatus, ListSummary, Plan, PlanItem, PublicTv, SavedList, SearchHit, TvInfo, YtChannel, YtPlaylist } from "@ytapp/shared";
 
 const TOKEN_KEY = "youtube.adminToken";
 
@@ -74,6 +74,8 @@ export const api = {
   googleSignOut: () => request("POST", "/api/admin/google/signout", {}),
   googleCheck: () => v(request<{ value: GoogleStatus }>("POST", "/api/admin/google/check", {})),
   myPlaylists: () => v(request<{ value: YtPlaylist[] }>("GET", "/api/admin/youtube/playlists")),
+  channel: (q: string) => v(request<{ value: { channel: YtChannel; playlists: YtPlaylist[] } }>("GET", `/api/admin/youtube/channel?q=${encodeURIComponent(q)}`)),
+  subscriptions: () => v(request<{ value: YtChannel[] }>("GET", "/api/admin/youtube/subscriptions")),
   search: (q: string) => v(request<{ value: SearchHit[] }>("GET", `/api/admin/youtube/search?q=${encodeURIComponent(q)}`)),
 
   // Library
@@ -91,7 +93,13 @@ export const api = {
   renameTv: (id: string, name: string) => request("PATCH", `/api/admin/tvs/${encodeURIComponent(id)}`, { name }),
   unlinkTv: (id: string) => request("DELETE", `/api/admin/tvs/${encodeURIComponent(id)}`),
   relinkTv: (id: string, code: string) => request("POST", `/api/admin/tvs/${encodeURIComponent(id)}/relink`, { code }),
-  control: (id: string, action: string, value?: number) => request("POST", `/api/admin/tvs/${encodeURIComponent(id)}/control`, { action, value }),
+  control: (id: string, action: string, value?: number | boolean) => request("POST", `/api/admin/tvs/${encodeURIComponent(id)}/control`, { action, value }),
   addToTv: (id: string, link: string) => request("POST", `/api/admin/tvs/${encodeURIComponent(id)}/add`, { link }),
-  play: (body: { tvIds: string[]; listId?: string; link?: string; startVideoId?: string }) => request<{ failed: string[] }>("POST", "/api/admin/play", body),
+  play: (body: { tvIds: string[]; listId?: string; link?: string; startVideoId?: string; loop?: boolean }) => request<{ failed: string[] }>("POST", "/api/admin/play", body),
+
+  // Plans
+  createPlan: (body: { name: string; items?: PlanItem[]; fromTvs?: boolean }) => v(request<{ value: Plan }>("POST", "/api/admin/plans", body)),
+  updatePlan: (id: string, body: { name?: string; items?: PlanItem[] }) => v(request<{ value: Plan }>("PATCH", `/api/admin/plans/${encodeURIComponent(id)}`, body)),
+  deletePlan: (id: string) => request("DELETE", `/api/admin/plans/${encodeURIComponent(id)}`),
+  startPlan: (id: string) => v(request<{ value: { started: number; failed: string[] } }>("POST", `/api/admin/plans/${encodeURIComponent(id)}/start`, {})),
 };

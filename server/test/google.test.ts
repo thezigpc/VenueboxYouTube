@@ -1,7 +1,7 @@
 // Google sign-in (device flow), the library read from YouTube, and connection health.
 import { afterEach, beforeEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
-import type { AdminState, GoogleStatus, ListSummary, SavedList, SearchHit, YtPlaylist } from "@ytapp/shared";
+import type { AdminState, GoogleStatus, ListSummary, SavedList, SearchHit, YtChannel, YtPlaylist } from "@ytapp/shared";
 import { startApp, until, type TestApp } from "./fakes.js";
 
 let t: TestApp;
@@ -147,6 +147,42 @@ describe("library from YouTube", () => {
     const l = await t.call<ListSummary>("POST", "/lists", { link: "https://youtu.be/dQw4w9WgXcQ" });
     assert.equal(l.name, "Never Gonna Give You Up");
     await assert.rejects(t.call("POST", "/lists", { playlistId: "PLchill000002" }), /Sign in with Google first/);
+  });
+});
+
+describe("channels", () => {
+  test("look up a channel by @handle: its info and its playlists", async () => {
+    await signIn();
+    const r = await t.call<{ channel: YtChannel; playlists: YtPlaylist[] }>("GET", "/youtube/channel?q=" + encodeURIComponent("https://www.youtube.com/@cartoons/videos"));
+    assert.equal(r.channel.title, "Cartoon Classics");
+    assert.equal(r.channel.videoCount, 130);
+    assert.deepEqual(r.playlists.map((p) => p.title), ["Favorites"]);
+    await assert.rejects(t.call("GET", "/youtube/channel?q=@nobodyhere"), /can't find that channel/);
+    await assert.rejects(t.call("GET", "/youtube/channel?q=" + encodeURIComponent("https://www.youtube.com/c/Old")), /@handle/);
+  });
+
+  test("a channel's newest uploads: Shorts and premieres left out, refreshed like a list", async () => {
+    await signIn();
+    const l = await t.call<ListSummary>("POST", "/lists", { link: "@cartoons" });
+    assert.equal(l.source.kind, "channel");
+    assert.equal(l.name, "Cartoon Classics");
+    const full = await t.call<SavedList>("GET", `/lists/${l.id}`);
+    // 130 uploads, 43 Shorts: 87 regular; the upcoming one is listed but not played.
+    assert.equal(full.videos.length, 87);
+    assert.equal(full.videos[0]!.unavailable, "Upcoming (not live yet)");
+    assert.ok(full.videos.every((v) => v.durationSec === 210));
+    // Fewer, Shorts included: the newest 20.
+    const fewer = await t.call<SavedList>("PATCH", `/lists/${l.id}`, { limit: 20, skipShorts: false });
+    assert.equal(fewer.videos.length, 20);
+    // Adding it again doesn't duplicate it.
+    await t.call("POST", "/lists", { channelId: full.source.kind === "channel" ? full.source.channelId : "" });
+    assert.equal((await t.call<AdminState>("GET", "/state")).lists.length, 1);
+  });
+
+  test("browse my subscriptions", async () => {
+    await signIn();
+    const subs = await t.call<YtChannel[]>("GET", "/youtube/subscriptions");
+    assert.deepEqual(subs.map((c) => c.title), ["Cartoon Classics"]);
   });
 });
 

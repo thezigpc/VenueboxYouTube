@@ -6,7 +6,7 @@
 // Playback never depends on any of this: TVs are driven by their TV link, lists are cached.
 
 import { log } from "@bargames/gamekit/server";
-import { parseIsoDuration, type GoogleMode, type GoogleStatus, type SearchHit, type Video, type YtPlaylist } from "@ytapp/shared";
+import { parseIsoDuration, type ChannelRef, type GoogleMode, type GoogleStatus, type SearchHit, type Video, type YtChannel, type YtPlaylist } from "@ytapp/shared";
 import type { Store } from "../store.js";
 import { nextMidnight, PACIFIC, zonedParts } from "../time.js";
 
@@ -480,15 +480,109 @@ export class GoogleService {
     for (let i = 0; i < unique.length; i += 50) {
       const batch = unique.slice(i, i + 50);
       const r = (await this.api("videos", { part: "snippet,contentDetails,status", id: batch.join(","), maxResults: "50" }, 1)) as {
-        items?: { id: string; snippet?: { title?: string; channelTitle?: string }; contentDetails?: { duration?: string }; status?: { uploadStatus?: string } }[];
+        items?: { id: string; snippet?: { title?: string; channelTitle?: string; liveBroadcastContent?: string }; contentDetails?: { duration?: string }; status?: { uploadStatus?: string } }[];
       };
       for (const it of r.items ?? []) {
         const v: Video = { id: it.id, title: it.snippet?.title ?? "", channel: it.snippet?.channelTitle ?? "" };
         const dur = it.contentDetails?.duration ? parseIsoDuration(it.contentDetails.duration) : undefined;
         if (dur !== undefined) v.durationSec = dur;
         if (it.status?.uploadStatus && !["processed", "uploaded"].includes(it.status.uploadStatus)) v.unavailable = "Not playable";
+        if (it.snippet?.liveBroadcastContent === "upcoming") v.unavailable = "Upcoming (not live yet)";
         out.set(it.id, v);
       }
+    }
+    return out;
+  }
+
+  // ---------------------------------------------------------------- channels
+  /** A channel by @handle, id or old username (1 unit). */
+  async channel(ref: ChannelRef): Promise<Omit<YtChannel, "savedAs"> & { uploadsId: string }> {
+    const params: Record<string, string> = { part: "snippet,contentDetails,statistics", maxResults: "1" };
+    if ("handle" in ref) params.forHandle = ref.handle;
+    else if ("channelId" in ref) params.id = ref.channelId;
+    else params.forUsername = ref.username;
+    const r = (await this.api("channels", params, 1)) as {
+      items?: {
+        id: string;
+        snippet?: { title?: string; customUrl?: string; thumbnails?: Record<string, { url?: string }> };
+        contentDetails?: { relatedPlaylists?: { uploads?: string } };
+        statistics?: { videoCount?: string };
+      }[];
+    };
+    const c = r.items?.[0];
+    const uploadsId = c?.contentDetails?.relatedPlaylists?.uploads;
+    if (!c || !uploadsId) throw new GoogleError("YouTube can't find that channel. Check the @handle (it's on the channel's page, under its name).", 404);
+    return {
+      id: c.id,
+      title: c.snippet?.title ?? "",
+      handle: c.snippet?.customUrl ?? ("handle" in ref ? ref.handle : ""),
+      thumb: c.snippet?.thumbnails?.medium?.url ?? c.snippet?.thumbnails?.default?.url ?? null,
+      videoCount: c.statistics?.videoCount ? Number(c.statistics.videoCount) : null,
+      uploadsId,
+    };
+  }
+
+  /** A channel's public playlists (1 unit per 50, up to 200). */
+  async channelPlaylists(channelId: string): Promise<Omit<YtPlaylist, "savedAs">[]> {
+    const out: Omit<YtPlaylist, "savedAs">[] = [];
+    let pageToken = "";
+    for (let page = 0; page < 4; page++) {
+      const r = (await this.api("playlists", { part: "snippet,contentDetails", channelId, maxResults: "50", ...(pageToken ? { pageToken } : {}) }, 1)) as {
+        items?: { id: string; snippet?: { title?: string; thumbnails?: Record<string, { url?: string }> }; contentDetails?: { itemCount?: number } }[];
+        nextPageToken?: string;
+      };
+      for (const it of r.items ?? []) {
+        out.push({ id: it.id, title: it.snippet?.title ?? "(untitled)", count: it.contentDetails?.itemCount ?? 0, thumb: it.snippet?.thumbnails?.medium?.url ?? null, privacy: "public" });
+      }
+      if (!r.nextPageToken) break;
+      pageToken = r.nextPageToken;
+    }
+    return out;
+  }
+
+  /** The signed-in account's subscriptions (1 unit per 50, up to 500). */
+  async mySubscriptions(): Promise<Omit<YtChannel, "savedAs" | "videoCount">[]> {
+    const out: Omit<YtChannel, "savedAs" | "videoCount">[] = [];
+    let pageToken = "";
+    for (let page = 0; page < 10; page++) {
+      const r = (await this.api("subscriptions", { part: "snippet", mine: "true", order: "alphabetical", maxResults: "50", ...(pageToken ? { pageToken } : {}) }, 1, { needSignIn: true })) as {
+        items?: { snippet?: { title?: string; resourceId?: { channelId?: string }; thumbnails?: Record<string, { url?: string }> } }[];
+        nextPageToken?: string;
+      };
+      for (const it of r.items ?? []) {
+        const id = it.snippet?.resourceId?.channelId;
+        if (id) out.push({ id, title: it.snippet?.title ?? "", handle: "", thumb: it.snippet?.thumbnails?.default?.url ?? null });
+      }
+      if (!r.nextPageToken) break;
+      pageToken = r.nextPageToken;
+    }
+    return out;
+  }
+
+  /**
+   * A channel's newest uploads, newest first: up to `limit` videos, skipping Shorts (a minute
+   * or less) when asked. About 2 units per 50 read; reads at most a few pages past the limit.
+   */
+  async channelVideos(uploadsId: string, limit: number, skipShorts: boolean): Promise<Video[]> {
+    const out: Video[] = [];
+    let pageToken = "";
+    const maxPages = Math.min(40, Math.ceil(limit / 50) * 3);
+    for (let page = 0; page < maxPages && out.length < limit; page++) {
+      const r = (await this.api("playlistItems", { part: "contentDetails", playlistId: uploadsId, maxResults: "50", ...(pageToken ? { pageToken } : {}) }, 1)) as {
+        items?: { contentDetails?: { videoId?: string } }[];
+        nextPageToken?: string;
+      };
+      const ids = (r.items ?? []).map((it) => it.contentDetails?.videoId).filter((x): x is string => !!x);
+      const details = await this.videoDetails(ids);
+      for (const id of ids) {
+        const v = details.get(id);
+        if (!v) continue; // private or deleted: a channel list just leaves it out
+        if (skipShorts && v.durationSec !== undefined && v.durationSec > 0 && v.durationSec <= 60) continue;
+        out.push(v);
+        if (out.length >= limit) break;
+      }
+      if (!r.nextPageToken) break;
+      pageToken = r.nextPageToken;
     }
     return out;
   }

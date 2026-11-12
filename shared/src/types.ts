@@ -16,7 +16,9 @@ export type ListSource =
   /** Read from a YouTube playlist; Refresh replaces the videos with YouTube's. */
   | { kind: "youtube"; playlistId: string }
   /** Built in this app (copied, combined, pasted links, saved from a TV). */
-  | { kind: "local" };
+  | { kind: "local" }
+  /** A channel's newest uploads (Refresh reads them again). */
+  | { kind: "channel"; channelId: string; uploadsId: string; handle: string; limit: number; skipShorts: boolean };
 
 export interface ListRules {
   shuffle: boolean;
@@ -81,7 +83,7 @@ export interface TvQueueInfo {
   loop: boolean;
   /** Next few titles. */
   upNext: { id: string; title: string }[];
-  /** The TV is playing something we didn't queue (someone used the TV's remote). */
+  /** Under local control: someone used the TV directly, so we don't drive it (see TvInfo.local). */
   detached: boolean;
 }
 
@@ -98,6 +100,8 @@ export interface TvInfo {
   volume: number | null;
   muted: boolean;
   linkedAt: number;
+  /** Someone took the TV over: the app does nothing automatic until staff take it back. */
+  local: { since: number; reason: string } | null;
 }
 
 /** What guests see on "/": no ids, codes or tokens. */
@@ -165,9 +169,28 @@ export interface Settings {
   refreshHour: number;
 }
 
+/** One TV's part of a plan: play this list there. */
+export interface PlanItem {
+  tvId: string;
+  listId: string;
+  /** Overrides the list's own Loop setting. */
+  loop?: boolean;
+}
+
+/** A saved TV plan ("Saturday morning cartoons"): lists on TVs, started with one press. */
+export interface Plan {
+  id: string;
+  name: string;
+  items: PlanItem[];
+  createdAt: number;
+  updatedAt: number;
+  lastStartedAt?: number;
+}
+
 export interface AdminState {
   tvs: TvInfo[];
   lists: ListSummary[];
+  plans: Plan[];
   google: GoogleStatus;
   settings: Settings;
   attention: Attention[];
@@ -183,6 +206,17 @@ export interface YtPlaylist {
   thumb: string | null;
   privacy: string;
   /** Already in the library as this list id. */
+  savedAs: string | null;
+}
+
+/** A YouTube channel, for adding its uploads or one of its playlists. */
+export interface YtChannel {
+  id: string;
+  title: string;
+  handle: string;
+  thumb: string | null;
+  videoCount: number | null;
+  /** Already in the library as this list id (its uploads). */
   savedAs: string | null;
 }
 

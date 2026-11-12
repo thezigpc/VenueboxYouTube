@@ -4,6 +4,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { ListSummary, SavedList, SearchHit, YtPlaylist } from "@ytapp/shared";
 import { api } from "../api";
+import { ChannelBrowser } from "./ChannelBrowser";
 import type { PanelProps } from "../pages/AdminPage";
 
 const ago = (t?: number) => {
@@ -165,6 +166,14 @@ function ListEditor({ id, state, act, onClose }: Pick<PanelProps, "state" | "act
       <p className="muted small">
         {local ? (
           "Built here."
+        ) : list.source.kind === "channel" ? (
+          <>
+            The newest uploads of{" "}
+            <a href={`https://www.youtube.com/channel/${list.source.channelId}`} target="_blank" rel="noreferrer">
+              {list.source.handle || "this channel"}
+            </a>
+            , refreshed {ago(list.refreshedAt)}.
+          </>
         ) : (
           <>
             Read from YouTube, refreshed {ago(list.refreshedAt)}. Change it in YouTube, then Refresh.{" "}
@@ -175,6 +184,27 @@ function ListEditor({ id, state, act, onClose }: Pick<PanelProps, "state" | "act
         )}
         {list.refreshError && <span className="error"> Last refresh failed: {list.refreshError}</span>}
       </p>
+
+      {list.source.kind === "channel" && (
+        <div className="row wrap">
+          <label className="check">
+            Newest
+            <select value={list.source.limit} onChange={(e) => void save({ limit: Number(e.target.value) }, "Updated from the channel.")}>
+              {[...new Set([25, 50, 100, 200, 500, list.source.limit])]
+                .sort((a, b) => a - b)
+                .map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+            </select>
+            videos
+          </label>
+          <label className="check">
+            <input type="checkbox" checked={list.source.skipShorts} onChange={(e) => void save({ skipShorts: e.target.checked }, "Updated from the channel.")} /> Skip Shorts
+          </label>
+        </div>
+      )}
 
       <div className="row wrap">
         <label className="check">
@@ -285,7 +315,7 @@ function ListCard({ l, onOpen }: { l: ListSummary; onOpen: () => void }) {
       <span className="list-name">{l.name}</span>
       <span className="muted small">
         {l.playable} video{l.playable === 1 ? "" : "s"}
-        {l.count > l.playable && ` (+${l.count - l.playable} unavailable)`} · {l.source.kind === "youtube" ? "YouTube" : "built here"}
+        {l.count > l.playable && ` (+${l.count - l.playable} unavailable)`} · {l.source.kind === "youtube" ? "YouTube" : l.source.kind === "channel" ? "channel" : "built here"}
         {l.shuffle && " · shuffle"}
         {l.loop && " · loop"}
       </span>
@@ -297,6 +327,7 @@ function ListCard({ l, onOpen }: { l: ListSummary; onOpen: () => void }) {
 export function ListsPanel({ state, act, go }: PanelProps) {
   const [open, setOpen] = useState<string | null>(null);
   const [browse, setBrowse] = useState(false);
+  const [channels, setChannels] = useState(false);
   const [link, setLink] = useState("");
   const g = state.google;
   const signedIn = g.state === "connected";
@@ -321,8 +352,9 @@ export function ListsPanel({ state, act, go }: PanelProps) {
               Sign in with Google to browse your playlists
             </button>
           )}
+          {g.state === "connected" || g.hasApiKey ? <button onClick={() => setChannels(true)}>Add from a channel</button> : null}
           <button onClick={() => void act(() => api.createList({ name: "New list" }), "Created. Open it to add videos.")}>New empty list</button>
-          {state.lists.some((l) => l.source.kind === "youtube") && (
+          {state.lists.some((l) => l.source.kind !== "local") && (
             <button
               onClick={() =>
                 void act(async () => {
@@ -343,12 +375,13 @@ export function ListsPanel({ state, act, go }: PanelProps) {
             void act(() => api.createList({ link }), "Added.").then((ok) => ok && setLink(""));
           }}
         >
-          <input placeholder="…or paste a YouTube playlist or video link" value={link} onChange={(e) => setLink(e.target.value)} aria-label="Link" className="grow" />
+          <input placeholder="…or paste a YouTube playlist, channel or video link" value={link} onChange={(e) => setLink(e.target.value)} aria-label="Link" className="grow" />
           <button disabled={!link.trim()}>Add</button>
         </form>
       </section>
 
       {browse && <BrowseYouTube act={act} onClose={() => setBrowse(false)} account={g.account} />}
+      {channels && <ChannelBrowser act={act} onClose={() => setChannels(false)} signedIn={signedIn} />}
 
       <div className="list-grid">
         {state.lists.map((l) => (

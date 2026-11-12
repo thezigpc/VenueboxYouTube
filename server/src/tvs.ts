@@ -4,7 +4,11 @@
 //
 // Queue driving: the TV gets a window of the queue (setPlaylist with up to WINDOW ids) and
 // we top it up with addVideo as it plays. A video the TV can't play must never stall the
-// queue: if the TV sits stopped/ended (or never starts) we skip ahead ourselves.
+// queue: if it never starts, or the TV stops at a video's end, we skip ahead ourselves.
+//
+// Local control wins: when someone uses the TV directly (plays something else, stops
+// playback, leaves the video), the TV goes "local" and we stop every automatic action
+// (no skips, top-ups or restarts), also across restarts, until staff take it back.
 
 import { randomBytes, randomUUID } from "node:crypto";
 import { log } from "@bargames/gamekit/server";
@@ -69,7 +73,6 @@ class TvSession {
   nowPlaying: NowPlaying | null = null;
   volume: number | null = null;
   muted = false;
-  detached = false;
   private session: LoungeSession | null = null;
   private abort = new AbortController();
   private forceRefresh = false;
@@ -182,6 +185,8 @@ class TvSession {
       case "nowPlaying": {
         const videoId = typeof a.videoId === "string" ? a.videoId : "";
         if (!videoId) {
+          // The TV left the video (or between videos): the watchdog decides after a while.
+          if (this.nowPlaying) this.stateSince = this.d.now();
           this.nowPlaying = null;
           break;
         }
@@ -234,14 +239,15 @@ class TvSession {
       if (i < 0) i = q.videos.findIndex((v) => v.id === videoId);
       if (i >= 0) {
         known = q.videos[i];
-        this.detached = false;
-        if (i !== q.index) {
-          q.index = i;
-          this.persist();
+        if (!this.tv.local) {
+          if (i !== q.index) {
+            q.index = i;
+            this.persist();
+          }
+          void this.topUp();
         }
-        void this.topUp();
       } else if (changed) {
-        this.detached = true;
+        this.goLocal("Someone played something else on the TV.");
       }
     }
     known ??= this.d.titleOf(videoId);
@@ -288,7 +294,8 @@ class TvSession {
     q.index = i;
     q.base = i;
     q.sentEnd = i + window.length;
-    this.detached = false;
+    this.tv.local = null;
+    this.message = "";
     this.startedAt = this.d.now();
     this.stateSince = this.d.now();
     this.sawPlaying = false;
@@ -312,7 +319,7 @@ class TvSession {
   private topping = false;
   private async topUp(): Promise<void> {
     const q = this.tv.queue;
-    if (!q || this.topping || this.detached) return;
+    if (!q || this.topping || this.tv.local) return;
     this.topping = true;
     try {
       if (q.loop && q.listId && q.videos.length - q.index <= LOW_WATER) {
@@ -340,16 +347,37 @@ class TvSession {
     }
   }
 
-  /** The watchdog: skip a video the TV won't play, so the queue never stalls. */
+  /** Hands off: someone is using the TV directly. Only staff clear it (Take back / Play). */
+  private goLocal(reason: string): void {
+    if (this.tv.local) return;
+    this.tv.local = { since: this.d.now(), reason };
+    log.info("tv", "local control: hands off", { tv: this.tv.name, reason });
+    void this.d.store.saveTvs().catch(() => undefined);
+  }
+
+  /**
+   * The watchdog. It only ever moves our own queue along when the TV is clearly stuck on
+   * it: a video that never started (unplayable), or a video that ended with nothing after
+   * it. A video that played and was then stopped, or the TV leaving the video, is someone
+   * using the TV: hands off.
+   */
   private async tick(): Promise<void> {
     const q = this.tv.queue;
     const np = this.nowPlaying;
-    if (!q || this.detached || this.link !== "connected") return;
+    if (!q || this.tv.local || this.link !== "connected") return;
     const now = this.d.now();
     if (now - this.startedAt < this.d.timing.startGraceMs) return;
+    const quiet = now - this.stateSince > this.d.timing.stallMs;
+    // The list played to its end (no loop): nothing to do, and nobody took anything over.
+    if (q.index >= q.videos.length - 1 && (!np || np.state === "ended" || np.state === "stopped")) return;
+    if (quiet && this.sawPlaying && (!np || np.state === "stopped")) {
+      this.goLocal(np ? "Playback was stopped on the TV." : "Someone left the video on the TV.");
+      return;
+    }
     const stuck =
-      (np && (np.state === "stopped" || np.state === "ended") && now - this.stateSince > this.d.timing.stallMs) ||
+      (np && np.state === "ended" && quiet) ||
       // Never started (TV error screen on an unplayable video).
+      (np && !this.sawPlaying && np.state === "stopped" && quiet) ||
       (np && !this.sawPlaying && (np.state === "unknown" || np.state === "buffering") && now - this.stateSince > this.d.timing.startGraceMs);
     if (!stuck) return;
     const next = q.index + 1;
@@ -366,9 +394,32 @@ class TvSession {
   // ------------------------------------------------------------------ controls
   async control(action: string, value?: unknown): Promise<void> {
     switch (action) {
+      case "takeback": {
+        // Staff take the TV back from local control: our list again, where it was.
+        const q = this.tv.queue;
+        if (!q || !q.videos.length) throw new TvError("There's no list to go back to. Play a list instead.");
+        this.skipsWithoutPlay = 0;
+        await this.playFrom(this.nowPlaying && q.videos[q.index]?.id === this.nowPlaying.videoId ? q.index : q.index + 1 < q.videos.length ? q.index + 1 : 0);
+        await this.d.store.saveTvs();
+        return;
+      }
+      case "loop": {
+        // Loop the list that's playing now (or stop looping it), without restarting anything.
+        const q = this.tv.queue;
+        if (!q) throw new TvError("Nothing is queued on this TV.");
+        if (!q.listId && value) throw new TvError("Only a list can loop. Save this queue as a list, then play it with Loop on.");
+        q.loop = !!value;
+        await this.d.store.saveTvs();
+        if (q.loop) void this.topUp();
+        return;
+      }
+      case "release":
+        // Staff hand the TV to local control on purpose.
+        this.goLocal("Handed to the TV's own remote from the admin.");
+        return;
       case "play":
         // After the watchdog gave up, Play restarts the queue where it was.
-        if (this.skipsWithoutPlay >= 5 && this.tv.queue) {
+        if (this.skipsWithoutPlay >= 5 && this.tv.queue && !this.tv.local) {
           this.skipsWithoutPlay = 0;
           this.message = "";
           return this.playFrom(this.tv.queue.index);
@@ -379,7 +430,7 @@ class TvSession {
       case "next": {
         const q = this.tv.queue;
         // Our own skip when the TV has nothing after this one in its window.
-        if (q && !this.detached && q.sentEnd <= q.index + 1 && q.index + 1 < q.videos.length) return this.playFrom(q.index + 1);
+        if (q && !this.tv.local && q.sentEnd <= q.index + 1 && q.index + 1 < q.videos.length) return this.playFrom(q.index + 1);
         return this.command("next");
       }
       case "previous":
@@ -394,7 +445,7 @@ class TvSession {
       case "stop":
         await this.command("pause").catch(() => undefined);
         this.tv.queue = null;
-        this.detached = false;
+        this.tv.local = null;
         await this.d.store.saveTvs();
         return;
       default:
@@ -406,7 +457,7 @@ class TvSession {
   async addVideo(v: Video): Promise<void> {
     const q = this.tv.queue;
     await this.command("addVideo", { videoId: v.id, videoSources: "XX" });
-    if (q && !this.detached) {
+    if (q && !this.tv.local) {
       q.videos.splice(q.sentEnd, 0, v);
       q.sentEnd += 1;
       this.persist();
@@ -430,12 +481,13 @@ class TvSession {
             length: q.videos.length,
             loop: q.loop,
             upNext: q.videos.slice(q.index + 1, q.index + 6).map((v) => ({ id: v.id, title: v.title })),
-            detached: this.detached,
+            detached: !!this.tv.local,
           }
         : null,
       volume: this.volume,
       muted: this.muted,
       linkedAt: this.tv.linkedAt,
+      local: this.tv.local ?? null,
     };
   }
 }
@@ -558,7 +610,7 @@ export class TvManager {
   }
 
   /** Plays a list on one TV (its own shuffle when the list shuffles). */
-  async playList(id: string, list: SavedList, startVideoId?: string): Promise<TvInfo> {
+  async playList(id: string, list: SavedList, startVideoId?: string, loop?: boolean): Promise<TvInfo> {
     const s = this.get(id);
     let videos = buildQueue(list.videos, list, { lastPlayed: this.d.store.lastPlayed, now: this.d.now() });
     if (!videos.length) throw new TvError("That list has no playable videos.");
@@ -566,7 +618,7 @@ export class TvManager {
       const i = videos.findIndex((v) => v.id === startVideoId);
       if (i > 0) videos = [...videos.slice(i), ...videos.slice(0, i)];
     }
-    await s.setQueue({ listId: list.id, listName: list.name, videos, index: 0, base: 0, sentEnd: 0, loop: list.loop });
+    await s.setQueue({ listId: list.id, listName: list.name, videos, index: 0, base: 0, sentEnd: 0, loop: loop ?? list.loop });
     return s.info();
   }
 
