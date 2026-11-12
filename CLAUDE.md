@@ -178,7 +178,8 @@ TV control. Ask it for platform hooks; tell it "<id> <version> is published, ple
 - **Roku Express test (the user, at home).** Results go to the box session; they decide the
   media-provider design (SDK 0.9.0).
   1. Roku: Settings → System → Advanced system settings → Control by mobile apps → Network
-     access = Default/Permissive. IP under Settings → Network → About.
+     access. Try steps 2 and 4 with **Default** first (the box session's bench Rokus answer
+     HTTP 403 then, on newer Roku OS), then with **Permissive**. IP under Settings → Network → About.
   2. From a PC on the same Wi-Fi: `curl -d "" http://<roku-ip>:8060/launch/837`. Does
      YouTube open? With the TV off, does HDMI-CEC wake it / switch input?
   3. Link the Roku with a TV code in the admin, play a list, close YouTube, run the
@@ -207,5 +208,8 @@ TV control. Ask it for platform hooks; tell it "<id> <version> is published, ple
   `additionalData/screenId`, the same id as our Lounge link (pyytlounge dial.py does this).
   The box, on the LAN, can read it per TV and report it in `bg.tvs()`; we match it to our
   links, so no manual mapping, and maybe linking without a TV code (token from screenId).
+  Accepted for 0.9.0: GET only, the box keeps the screenId in memory only. Needs Roku
+  "Control by mobile apps" = Permissive (also for launch); the admin must say so on
+  "ecp-blocked" / DIAL 403. Pairing by TV code doesn't need it and stays the fallback.
 - Open/Closed status on TV cards (Lounge get_screen_availability).
 - Ideas not started: scheduled plans, guest requests.
