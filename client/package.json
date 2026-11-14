@@ -9,8 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@bargames/gamekit": "file:../vendor/bargames-gamekit-0.7.2.tgz",
-    "@bargames/sdk": "file:../vendor/bargames-sdk-0.13.0.tgz",
+    "@bargames/gamekit": "file:../vendor/bargames-gamekit-0.7.3.tgz",
+    "@bargames/sdk": "file:../vendor/bargames-sdk-0.13.1.tgz",
     "@ytapp/shared": "*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

@@ -130,7 +130,7 @@ library. It never streams video itself.
 - Integration guide: `C:\CodeProjects\GameBroker\integration\README.md` (SDK 0.8.0, apps,
   staff sign-in); kit README: `C:\CodeProjects\GameKit\README.md`. Model to copy from:
   `C:\CodeProjects\MenuModule` (the Menu app: same stack, an app on the box).
-- Vendored in `vendor/`: `bargames-sdk-0.8.0.tgz`, `bargames-gamekit-0.5.1.tgz`.
+- Vendored in `vendor/`: `bargames-sdk-0.13.1.tgz`, `bargames-gamekit-0.7.3.tgz`.
 - Standalone it must still work (its own admin password, TVs linked by code), like every
   app; off a box the SDK changes nothing.
 
