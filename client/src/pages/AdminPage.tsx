@@ -114,7 +114,9 @@ export function AdminPage() {
 
   const go = useCallback((t: Tab) => {
     setTab(t);
-    history.replaceState(null, "", `#${t}`);
+    // Full path: a bare "#tab" resolves against <base href="/youtube/"> (path routing) and
+    // would turn the address into the guest page's.
+    history.replaceState(null, "", `${location.pathname}${location.search}#${t}`);
   }, []);
 
   const check = useCallback(async () => {

@@ -9,8 +9,8 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@bargames/gamekit": "file:../vendor/bargames-gamekit-0.10.3.tgz",
-    "@bargames/sdk": "file:../vendor/bargames-sdk-0.14.0.tgz",
+    "@bargames/gamekit": "file:../vendor/bargames-gamekit-0.10.6.tgz",
+    "@bargames/sdk": "file:../vendor/bargames-sdk-0.16.0.tgz",
     "@ytapp/shared": "*",
     "express": "^4.19.2"
   },

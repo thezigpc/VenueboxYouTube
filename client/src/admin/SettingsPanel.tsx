@@ -12,7 +12,7 @@ export function SettingsPanel({ state, act }: PanelProps) {
       className="card stack-sm settings"
       onSubmit={(e) => {
         e.preventDefault();
-        void act(() => api.saveSettings({ name, searchCap: Number(cap), refreshHour: Number(hour) }), "Saved.");
+        void act(() => api.saveSettings({ name, searchCap: Math.min(90, Number(cap) || 0), refreshHour: Number(hour) }), "Saved.");
       }}
     >
       <h2>Settings</h2>
@@ -23,12 +23,12 @@ export function SettingsPanel({ state, act }: PanelProps) {
       </label>
       <label>
         Searches per day
-        <input type="number" min={0} max={90} value={cap} onChange={(e) => setCap(e.target.value)} className="num" inputMode="numeric" />
+        <input type="text" inputMode="numeric" maxLength={2} value={cap} onChange={(e) => setCap(e.target.value.replace(/D/g, ""))} className="num" aria-label="Searches per day" />
         <span className="muted small">Each search costs 100 of YouTube's 10,000 free daily units (reading a 200-video list costs about 8). 0 turns search off.</span>
       </label>
       <label>
         Nightly refresh at
-        <select value={hour} onChange={(e) => setHour(e.target.value)}>
+        <select value={hour} onChange={(e) => setHour(e.target.value)} aria-label="Nightly refresh at">
           {Array.from({ length: 24 }, (_, h) => (
             <option key={h} value={h}>
               {h}:00

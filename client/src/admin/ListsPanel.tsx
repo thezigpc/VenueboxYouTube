@@ -189,7 +189,7 @@ function ListEditor({ id, state, act, onClose }: Pick<PanelProps, "state" | "act
         <div className="row wrap">
           <label className="check">
             Newest
-            <select value={list.source.limit} onChange={(e) => void save({ limit: Number(e.target.value) }, "Updated from the channel.")}>
+            <select aria-label="Newest videos" value={list.source.limit} onChange={(e) => void save({ limit: Number(e.target.value) }, "Updated from the channel.")}>
               {[...new Set([25, 50, 100, 200, 500, list.source.limit])]
                 .sort((a, b) => a - b)
                 .map((n) => (
@@ -216,14 +216,20 @@ function ListEditor({ id, state, act, onClose }: Pick<PanelProps, "state" | "act
         <label className="check">
           No repeat within
           <input
-            type="number"
-            min={0}
-            max={168}
-            className="num"
+            type="text"
             inputMode="numeric"
+            maxLength={3}
+            className="num"
+            aria-label="No repeat within hours"
             defaultValue={list.noRepeatHours}
             key={`nr${list.noRepeatHours}`}
-            onBlur={(e) => Number(e.target.value) !== list.noRepeatHours && void save({ noRepeatHours: Number(e.target.value) })}
+            onChange={(e) => (e.target.value = e.target.value.replace(/D/g, ""))}
+            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+            onBlur={(e) => {
+              const h = Math.min(168, Number(e.target.value) || 0);
+              if (h !== list.noRepeatHours) void save({ noRepeatHours: h });
+              else e.target.value = String(h);
+            }}
           />
           hours {!list.shuffle && list.noRepeatHours > 0 && <span className="muted small">(with shuffle)</span>}
         </label>

@@ -49,7 +49,7 @@ function BoxTvPicker({ tv, boxTvs, act }: { tv: TvInfo; boxTvs: BoxTvChoice[] } 
     <div className="stack-sm small">
       <label className="check">
         Box TV
-        <select value={current} onChange={(e) => void act(() => api.mapTv(tv.id, e.target.value || null), e.target.value ? "Matched to the box's TV." : "Unmatched.")}>
+        <select aria-label="Box TV" value={current} onChange={(e) => void act(() => api.mapTv(tv.id, e.target.value || null), e.target.value ? "Matched to the box's TV." : "Unmatched.")}>
           <option value="">Not matched</option>
           {boxTvs.map((b) => (
             <option key={b.id} value={b.id}>

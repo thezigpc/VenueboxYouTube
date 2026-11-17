@@ -45,7 +45,7 @@ function ChannelCard({ q, act, onBack }: Pick<PanelProps, "act"> & { q: string; 
       <div className="row wrap">
         <label className="check small">
           Newest
-          <select value={limit} onChange={(e) => setLimit(Number(e.target.value))}>
+          <select value={limit} onChange={(e) => setLimit(Number(e.target.value))} aria-label="Newest videos">
             {[25, 50, 100, 200, 500].map((n) => (
               <option key={n} value={n}>
                 {n}
