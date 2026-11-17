@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { basePath, ErrorBoundary } from "@bargames/gamekit/client";
+import { basePath, ErrorBoundary, OnScreenKeyboard } from "@bargames/gamekit/client";
 import { NowPage } from "./pages/NowPage";
 import { AdminPage } from "./pages/AdminPage";
 import "./index.css";
@@ -28,5 +28,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     >
       <Page />
     </ErrorBoundary>
+    {/* Big keys for a touchscreen on the box (hidden on phones, tablets and PCs). */}
+    <OnScreenKeyboard />
   </React.StrictMode>,
 );

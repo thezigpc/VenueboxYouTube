@@ -118,7 +118,7 @@ export function ChannelBrowser({ act, onClose, signedIn }: Pick<PanelProps, "act
       ) : (
         <>
           <form className="row" onSubmit={submit}>
-            <input className="grow" placeholder="Channel link or @handle" value={input} onChange={(e) => setInput(e.target.value)} aria-label="Channel" autoFocus />
+            <input className="grow" placeholder="Channel link or @handle" value={input} onChange={(e) => setInput(e.target.value)} aria-label="Channel" maxLength={300} autoCapitalize="none" autoFocus />
             <button disabled={input.trim().length < 3}>Look up</button>
           </form>
           {signedIn &&
@@ -128,7 +128,7 @@ export function ChannelBrowser({ act, onClose, signedIn }: Pick<PanelProps, "act
               </button>
             ) : (
               <div className="stack-sm">
-                {subs.length > 10 && <input placeholder="Filter" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Filter subscriptions" />}
+                {subs.length > 10 && <input placeholder="Filter" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Filter subscriptions" maxLength={60} />}
                 <ul className="yt-list">
                   {shown.map((c) => (
                     <li key={c.id}>

@@ -87,7 +87,7 @@ function SearchBox({ onPick, state }: { onPick: (id: string) => void } & Pick<Pa
   return (
     <div className="stack-sm">
       <form className="row" onSubmit={run}>
-        <input placeholder="Quick search YouTube" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search" />
+        <input placeholder="Quick search YouTube" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search" maxLength={100} />
         <button disabled={q.trim().length < 2 || left <= 0}>Search</button>
       </form>
       <p className="muted small">{left > 0 ? `${left} searches left today.` : "No searches left today."}</p>
@@ -220,6 +220,7 @@ function ListEditor({ id, state, act, onClose }: Pick<PanelProps, "state" | "act
             min={0}
             max={168}
             className="num"
+            inputMode="numeric"
             defaultValue={list.noRepeatHours}
             key={`nr${list.noRepeatHours}`}
             onBlur={(e) => Number(e.target.value) !== list.noRepeatHours && void save({ noRepeatHours: Number(e.target.value) })}
@@ -245,7 +246,7 @@ function ListEditor({ id, state, act, onClose }: Pick<PanelProps, "state" | "act
               void add({ links }).then((ok) => ok && setLinks(""));
             }}
           >
-            <input placeholder="Paste YouTube links (videos or playlists)" value={links} onChange={(e) => setLinks(e.target.value)} aria-label="Links to add" className="grow" />
+            <input placeholder="Paste YouTube links (videos or playlists)" value={links} onChange={(e) => setLinks(e.target.value)} aria-label="Links to add" maxLength={5000} autoCapitalize="none" className="grow" />
             <button disabled={!links.trim()}>Add</button>
           </form>
           <div className="row">
@@ -375,7 +376,7 @@ export function ListsPanel({ state, act, go }: PanelProps) {
             void act(() => api.createList({ link }), "Added.").then((ok) => ok && setLink(""));
           }}
         >
-          <input placeholder="…or paste a YouTube playlist, channel or video link" value={link} onChange={(e) => setLink(e.target.value)} aria-label="Link" className="grow" />
+          <input placeholder="…or paste a YouTube playlist, channel or video link" value={link} onChange={(e) => setLink(e.target.value)} aria-label="Link" maxLength={500} autoCapitalize="none" className="grow" />
           <button disabled={!link.trim()}>Add</button>
         </form>
       </section>

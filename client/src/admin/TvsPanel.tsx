@@ -32,7 +32,7 @@ function LinkTvForm({ act, onDone, relinkId }: Pick<PanelProps, "act"> & { onDon
         <li>Type the code here within a few minutes.</li>
       </ol>
       <div className="row wrap">
-        <input inputMode="numeric" placeholder="123 456 789 012" value={code} onChange={(e) => setCode(e.target.value)} aria-label="TV code" required />
+        <input inputMode="numeric" placeholder="123 456 789 012" value={code} onChange={(e) => setCode(e.target.value)} aria-label="TV code" maxLength={20} required />
         {!relinkId && <input placeholder="Name, e.g. Bar left" value={name} onChange={(e) => setName(e.target.value)} aria-label="TV name" maxLength={40} />}
         <button className="primary" disabled={busy || code.replace(/\D/g, "").length !== 12}>
           {busy ? "Linking…" : relinkId ? "Re-link" : "Link TV"}
@@ -245,7 +245,7 @@ function TvCard({ tv, state, act, boxTvs }: { tv: TvInfo; boxTvs: BoxTvChoice[] 
           void act(() => api.addToTv(tv.id, link), "Added to the queue.").then((ok) => ok && setLink(""));
         }}
       >
-        <input placeholder="YouTube video link" value={link} onChange={(e) => setLink(e.target.value)} aria-label="Video link to add" />
+        <input placeholder="YouTube video link" value={link} onChange={(e) => setLink(e.target.value)} aria-label="Video link to add" maxLength={500} autoCapitalize="none" />
         <button disabled={!live || !link.trim()}>Add to queue</button>
         <button type="button" className="link small" disabled={!live || !link.trim()} onClick={() => void act(() => api.play({ tvIds: [tv.id], link }), "Playing now.").then((ok) => ok && setLink(""))}>
           Play now

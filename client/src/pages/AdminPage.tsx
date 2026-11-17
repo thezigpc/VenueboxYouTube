@@ -79,12 +79,12 @@ function AuthForm({ status, onDone }: { status: AuthStatus; onDone: () => void }
       </p>
       <label>
         Password
-        <input type="password" autoComplete={setup ? "new-password" : "current-password"} value={password} onChange={(e) => setPassword(e.target.value)} autoFocus required />
+        <input type="password" autoComplete={setup ? "new-password" : "current-password"} value={password} onChange={(e) => setPassword(e.target.value)} maxLength={200} autoCapitalize="none" autoFocus required />
       </label>
       {setup && (
         <label>
           Password again
-          <input type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
+          <input type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} maxLength={200} autoCapitalize="none" required />
         </label>
       )}
       {error && <p className="error">{error}</p>}

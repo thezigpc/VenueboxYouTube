@@ -150,11 +150,11 @@ function Wizard({ g, act, highlight }: { g: GoogleStatus; highlight: number | nu
         <form className="stack-sm" onSubmit={saveClient}>
           <label>
             Client ID
-            <input value={clientId} onChange={(e) => setClientId(e.target.value.trim())} placeholder="…apps.googleusercontent.com" required />
+            <input value={clientId} onChange={(e) => setClientId(e.target.value.trim())} placeholder="…apps.googleusercontent.com" maxLength={200} autoCapitalize="none" required />
           </label>
           <label>
             Client secret {g.hasClientSecret && <span className="muted small">(saved; leave empty to keep it)</span>}
-            <input type="password" value={secret} onChange={(e) => setSecret(e.target.value.trim())} autoComplete="off" required={!g.hasClientSecret} />
+            <input type="password" value={secret} onChange={(e) => setSecret(e.target.value.trim())} autoComplete="off" maxLength={200} autoCapitalize="none" required={!g.hasClientSecret} />
           </label>
           <button className="primary" disabled={!clientId}>
             Save and sign in
@@ -296,7 +296,7 @@ export function GooglePanel({ state, act, go }: PanelProps) {
             void act(() => api.googleConfig({ apiKey }), apiKey ? "API key saved." : "API key removed.").then(() => setApiKey(""));
           }}
         >
-          <input type="password" placeholder={g.hasApiKey ? "Saved (enter a new one to replace)" : "API key"} value={apiKey} onChange={(e) => setApiKey(e.target.value.trim())} autoComplete="off" />
+          <input type="password" placeholder={g.hasApiKey ? "Saved (enter a new one to replace)" : "API key"} value={apiKey} onChange={(e) => setApiKey(e.target.value.trim())} autoComplete="off" maxLength={200} autoCapitalize="none" />
           <button>{apiKey || !g.hasApiKey ? "Save" : "Remove"}</button>
         </form>
       </section>

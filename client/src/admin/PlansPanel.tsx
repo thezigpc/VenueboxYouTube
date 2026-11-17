@@ -1,7 +1,7 @@
 // Plans: saved "these lists on these TVs" setups ("Saturday morning cartoons"), started
 // with one press. TVs left out of a plan are left alone.
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import type { Plan, PlanItem } from "@ytapp/shared";
 import { api } from "../api";
 import type { PanelProps } from "../pages/AdminPage";
@@ -19,14 +19,15 @@ function PlanEditor({ draft, setDraft, state, act, onDone }: Pick<PanelProps, "s
     const cur = draft.items[tvId] ?? { listId: "", loop: null };
     setDraft({ ...draft, items: { ...draft.items, [tvId]: { ...cur, ...patch } } });
   };
-  const save = () => {
+  const save = (e: FormEvent) => {
+    e.preventDefault();
     const items: PlanItem[] = Object.entries(draft.items)
       .filter(([, v]) => v.listId)
       .map(([tvId, v]) => ({ tvId, listId: v.listId, ...(v.loop === null ? {} : { loop: v.loop }) }));
     void act(() => (draft.id ? api.updatePlan(draft.id, { name: draft.name, items }) : api.createPlan({ name: draft.name, items })), "Plan saved.").then((ok) => ok && onDone());
   };
   return (
-    <section className="card stack-sm">
+    <form className="card stack-sm" onSubmit={save}>
       <h2>{draft.id ? "Edit plan" : "New plan"}</h2>
       <label>
         Name
@@ -66,14 +67,14 @@ function PlanEditor({ draft, setDraft, state, act, onDone }: Pick<PanelProps, "s
         </tbody>
       </table>
       <div className="row">
-        <button className="primary" disabled={!draft.name.trim() || !Object.values(draft.items).some((v) => v.listId)} onClick={save}>
+        <button className="primary" disabled={!draft.name.trim() || !Object.values(draft.items).some((v) => v.listId)} >
           Save plan
         </button>
-        <button className="link" onClick={onDone}>
+        <button type="button" className="link" onClick={onDone}>
           Cancel
         </button>
       </div>
-    </section>
+    </form>
   );
 }
 
